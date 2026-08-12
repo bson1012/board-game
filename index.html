@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hot Streak Workshop Boardgame</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+<body class="bg-slate-900 text-white min-h-screen">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    const MASCOTS = [
+      { id: 'hotdog', name: '🌭 핫도그', color: 'bg-red-500' },
+      { id: 'bear', name: '🐻 곰돌이', color: 'bg-amber-600' },
+      { id: 'duck', name: '🦆 오리', color: 'bg-yellow-400' },
+      { id: 'rabbit', name: '🐰 토끼', color: 'bg-pink-400' }
+    ];
+
+    const CARDS = [
+      { id: 'f2', label: '🚀 +2칸 전진', val: 2 },
+      { id: 'f1', label: '🏃 +1칸 전진', val: 1 },
+      { id: 'b1', label: '🍌 -1칸 후퇴', val: -1 },
+      { id: 'stop', label: '🛑 얼음 (0)', val: 0 }
+    ];
+
+    function App() {
+      const [role, setRole] = useState(null); // 'host' | 'client'
+      const [peerId, setPeerId] = useState('');
+      const [targetHostId, setTargetHostId] = useState('');
+      const [teamNo, setTeamNo] = useState(1);
+
+      // State for Host
+      const [teamsData, setTeamsData] = useState(
+        Array.from({ length: 8 }, (_, i) => ({
+          id: i + 1,
+          connected: false,
+          bet: null,
+          card: null,
+          score: 100
+        }))
+      );
+      const [gamePhase, setGamePhase] = useState('BETTING'); // BETTING, CARD, RACE, RESULT
+      const [mascotPositions, setMascotPositions] = useState({ hotdog: 0, bear: 0, duck: 0, rabbit: 0 });
+      const [round, setRound] = useState(1);
+
+      // PeerJS refs
+      const peerRef = useRef(null);
+      const connRef = useRef(null);
+      const connectionsRef = useRef({});
+
+      // Host Peer Init
+      const initHost = () => {
+        const id = 'hotstreak-workshop-' + Math.floor(1000 + Math.random() * 9000);
+        const peer = new Peer(id);
+        peerRef.current = peer;
+
+        peer.on('open', (id) => {
+          setPeerId(id);
+          setRole('host');
+        });
+
+        peer.on('connection', (conn) => {
+          conn.on('data', (data) => {
+            handleClientData(data);
+          });
+          
+          conn.on('open', () => {
+            // Handle new connection
+          });
+        });
+      };
+
+      // Client Peer Init
+      const initClient = () => {
+        if (!targetHostId) return alert('호스트 코드를 입력하세요!');
+        const peer = new Peer();
+        peerRef.current = peer;
+
+        peer.on('open', () => {
+          const conn = peer.connect(targetHostId);
+          connRef.current = conn;
+          
+          conn.on('open', () => {
+            setRole('client');
+            conn.send({ type: 'JOIN', teamNo: Number(teamNo) });
+          });
+
+          conn.on('data', (data) => {
+            if (data.type === 'PHASE_CHANGE') {
+              setGamePhase(data.phase);
+            }
+          });
+        });
+      };
+
+      // Host Data Handler
+      const handleClientData = (data) => {
+        if (data.type === 'JOIN') {
+          setTeamsData(prev => prev.map(t => t.id === data.teamNo ? { ...t, connected: true } : t));
+        } else if (data.type === 'SUBMIT_BET') {
+          setTeamsData(prev => prev.map(t => t.id === data.teamNo ? { ...t, bet: data.bet } : t));
+        } else if (data.type === 'SUBMIT_CARD') {
+          setTeamsData(prev => prev.map(t => t.id === data.teamNo ? { ...t, card: data.card } : t));
+        }
+      };
+
+      const broadcastPhase = (phase) => {
+        setGamePhase(phase);
+        Object.values(connectionsRef.current).forEach(conn => {
+          if (conn.open) conn.send({ type: 'PHASE_CHANGE', phase });
+        });
+      };
+
+      // Run Race Simulation
+      const runRace = () => {
+        broadcastPhase('RACE');
+        let newPos = { ...mascotPositions };
+
+        // Apply Card Effects
+        teamsData.forEach(t => {
+          if (t.card) {
+            const cardObj = CARDS.find(c => c.id === t.card.cardId);
+            if (cardObj && newPos[t.card.mascotId] !== undefined) {
+              newPos[t.card.mascotId] = Math.max(0, Math.min(10, newPos[t.card.mascotId] + cardObj.val));
+            }
+          }
+        });
+
+        // Animate Race
+        setTimeout(() => {
+          setMascotPositions(newPos);
+          
+          // Calculate Winner
+          const sorted = Object.entries(newPos).sort((a, b) => b[1] - a[1]);
+          const winnerId = sorted[0][0];
+
+          // Calculate Scores
+          setTeamsData(prev => prev.map(t => {
+            if (t.bet === winnerId) {
+              return { ...t, score: t.score + 50 };
+            }
+            return t;
+          }));
+
+          setTimeout(() => broadcastPhase('RESULT'), 2000);
+        }, 1000);
+      };
+
+      const nextRound = () => {
+        setMascotPositions({ hotdog: 0, bear: 0, duck: 0, rabbit: 0 });
+        setTeamsData(prev => prev.map(t => ({ ...t, bet: null, card: null })));
+        setRound(r => r + 1);
+        broadcastPhase('BETTING');
+      };
+
+      // Selection Screen
+      if (!role) {
+        return (
+          <div className="flex flex-col items-center justify-center min-h-screen p-4">
+            <h1 className="text-4xl font-extrabold mb-8 text-amber-400">🔥 Hot Streak Workshop</h1>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-md">
+              <button onClick={initHost} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-6 rounded-xl shadow-lg transition">
+                📺 메인 스크린 생성 (Host)
+              </button>
+              <div className="bg-slate-800 p-6 rounded-xl flex flex-col gap-3">
+                <h2 className="text-xl font-bold">📱 조별 접속 (Client)</h2>
+                <input 
+                  type="text" 
+                  placeholder="호스트 코드 입력" 
+                  value={targetHostId}
+                  onChange={e => setTargetHostId(e.target.value)}
+                  className="p-2 rounded bg-slate-700 border border-slate-600 text-white"
+                />
+                <select 
+                  value={teamNo} 
+                  onChange={e => setTeamNo(e.target.value)}
+                  className="p-2 rounded bg-slate-700 border border-slate-600 text-white"
+                >
+                  {Array.from({ length: 8 }, (_, i) => (
+                    <option key={i + 1} value={i + 1}>{i + 1}조</option>
+                  ))}
+                </select>
+                <button onClick={initClient} className="bg-emerald-600 hover:bg-emerald-500 font-bold py-3 rounded-lg transition">
+                  접속하기
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      // HOST DISPLAY
+      if (role === 'host') {
+        return (
+          <div className="p-6 max-w-7xl mx-auto flex flex-col gap-6">
+            {/* Header & Control Panel */}
+            <div className="bg-slate-800 p-4 rounded-xl flex flex-wrap justify-between items-center gap-4">
+              <div>
+                <h1 className="text-2xl font-bold text-amber-400">🔥 Hot Streak [Round {round}]</h1>
+                <p className="text-sm text-slate-400">접속 코드: <span className="text-white font-mono font-bold">{peerId}</span></p>
+              </div>
+              <div className="flex gap-2">
+                {gamePhase === 'BETTING' && (
+                  <button onClick={() => broadcastPhase('CARD')} className="bg-blue-600 px-4 py-2 rounded-lg font-bold">카드 제출 단계로</button>
+                )}
+                {gamePhase === 'CARD' && (
+                  <button onClick={runRace} className="bg-rose-600 px-4 py-2 rounded-lg font-bold">🏎️ 레이스 시작!</button>
+                )}
+                {gamePhase === 'RESULT' && (
+                  <button onClick={nextRound} className="bg-emerald-600 px-4 py-2 rounded-lg font-bold">다음 라운드 ➡️</button>
+                )}
+              </div>
+            </div>
+
+            {/* Race Track */}
+            <div className="bg-slate-800 p-6 rounded-xl border border-slate-700">
+              <h2 className="text-xl font-bold mb-4">🏟️ 경기장</h2>
+              <div className="flex flex-col gap-4">
+                {MASCOTS.map(m => (
+                  <div key={m.id} className="flex items-center gap-4">
+                    <span className="w-24 font-bold">{m.name}</span>
+                    <div className="flex-1 bg-slate-700 h-10 rounded-lg relative overflow-hidden flex items-center px-2">
+                      {/* Track Grid */}
+                      <div className="absolute inset-0 grid grid-cols-11 pointer-events-none opacity-20">
+                        {Array.from({ length: 11 }).map((_, i) => (
+                          <div key={i} className="border-r border-white"></div>
+                        ))}
+                      </div>
+                      {/* Mascot Marker */}
+                      <div 
+                        className={`h-8 w-8 rounded-full ${m.color} flex items-center justify-center font-bold text-xs transition-all duration-700 shadow-md`}
+                        style={{ left: `${(mascotPositions[m.id] / 10) * 90}%`, position: 'relative' }}
+                      >
+                        {mascotPositions[m.id]}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Teams Dashboard */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {teamsData.map(t => (
+                <div key={t.id} className={`p-4 rounded-xl border ${t.connected ? 'bg-slate-800 border-slate-600' : 'bg-slate-800/40 border-slate-700/50 opacity-50'}`}>
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="font-bold text-lg">{t.id}조</span>
+                    <span className="text-amber-400 font-bold">{t.score} pt</span>
+                  </div>
+                  <div className="text-xs space-y-1 text-slate-300">
+                    <div>베팅: {t.bet ? MASCOTS.find(m => m.id === t.bet)?.name : '⏳ 대기 중'}</div>
+                    <div>카드: {t.card ? '✅ 제출 완료' : '⏳ 대기 중'}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      }
+
+      // CLIENT DISPLAY
+      if (role === 'client') {
+        const myTeam = teamsData.find(t => t.id === Number(teamNo));
+
+        const sendBet = (mascotId) => {
+          if (connRef.current) connRef.current.send({ type: 'SUBMIT_BET', teamNo: Number(teamNo), bet: mascotId });
+          setTeamsData(prev => prev.map(t => t.id === Number(teamNo) ? { ...t, bet: mascotId } : t));
+        };
+
+        const sendCard = (mascotId, cardId) => {
+          if (connRef.current) connRef.current.send({ type: 'SUBMIT_CARD', teamNo: Number(teamNo), card: { mascotId, cardId } });
+          setTeamsData(prev => prev.map(t => t.id === Number(teamNo) ? { ...t, card: { mascotId, cardId } } : t));
+        };
+
+        return (
+          <div className="p-4 max-w-md mx-auto min-h-screen flex flex-col justify-between">
+            <div>
+              <div className="bg-slate-800 p-4 rounded-xl flex justify-between items-center mb-6">
+                <span className="text-xl font-bold text-amber-400">{teamNo}조 화면</span>
+                <span className="text-sm bg-slate-700 px-3 py-1 rounded-full font-bold">Phase: {gamePhase}</span>
+              </div>
+
+              {/* BETTING PHASE */}
+              {gamePhase === 'BETTING' && (
+                <div>
+                  <h2 className="text-lg font-bold mb-4">🎯 우승 예상 마스코트에 베팅하세요</h2>
+                  <div className="grid grid-cols-1 gap-3">
+                    {MASCOTS.map(m => (
+                      <button 
+                        key={m.id}
+                        onClick={() => sendBet(m.id)}
+                        className={`p-4 rounded-xl font-bold flex justify-between items-center border transition ${myTeam?.bet === m.id ? 'bg-amber-500/20 border-amber-400 text-amber-300' : 'bg-slate-800 border-slate-700'}`}
+                      >
+                        <span>{m.name}</span>
+                        {myTeam?.bet === m.id && <span>SELECTED</span>}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* CARD PHASE */}
+              {gamePhase === 'CARD' && (
+                <div>
+                  <h2 className="text-lg font-bold mb-4">🃏 레이스에 적용할 카드를 선택하세요</h2>
+                  <CardSelection MASCOTS={MASCOTS} CARDS={CARDS} onSubmit={sendCard} currentCard={myTeam?.card} />
+                </div>
+              )}
+
+              {/* WAIT / RESULT PHASE */}
+              {(gamePhase === 'RACE' || gamePhase === 'RESULT') && (
+                <div className="text-center py-12">
+                  <div className="text-4xl mb-4">🏎️</div>
+                  <h2 className="text-xl font-bold mb-2">레이스가 진행 중입니다!</h2>
+                  <p className="text-slate-400 text-sm">메인 화면을 확인해 주세요.</p>
+                </div>
+              )}
+            </div>
+
+            <div className="text-center text-xs text-slate-500 py-4">Hot Streak Workshop Assistant</div>
+          </div>
+        );
+      }
+    }
+
+    // Client Sub-component for Card Selection
+    function CardSelection({ MASCOTS, CARDS, onSubmit, currentCard }) {
+      const [selectedMascot, setSelectedMascot] = useState(MASCOTS[0].id);
+      const [selectedCard, setSelectedCard] = useState(CARDS[0].id);
+
+      return (
+        <div className="bg-slate-800 p-4 rounded-xl flex flex-col gap-4">
+          <div>
+            <label className="text-xs text-slate-400 block mb-2">대상 마스코트</label>
+            <div className="grid grid-cols-2 gap-2">
+              {MASCOTS.map(m => (
+                <button 
+                  key={m.id}
+                  onClick={() => setSelectedMascot(m.id)}
+                  className={`p-2 rounded text-sm font-bold border ${selectedMascot === m.id ? 'bg-blue-600 border-blue-400' : 'bg-slate-700 border-slate-600'}`}
+                >
+                  {m.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs text-slate-400 block mb-2">적용할 카드</label>
+            <div className="grid grid-cols-2 gap-2">
+              {CARDS.map(c => (
+                <button 
+                  key={c.id}
+                  onClick={() => setSelectedCard(c.id)}
+                  className={`p-2 rounded text-sm font-bold border ${selectedCard === c.id ? 'bg-emerald-600 border-emerald-400' : 'bg-slate-700 border-slate-600'}`}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <button 
+            onClick={() => onSubmit(selectedMascot, selectedCard)}
+            className="w-full bg-amber-500 hover:bg-amber-400 text-slate-900 font-extrabold py-3 rounded-lg transition mt-2"
+          >
+            {currentCard ? '카드 변경 및 제출' : '카드 제출하기'}
+          </button>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
