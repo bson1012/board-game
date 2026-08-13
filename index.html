@@ -583,13 +583,13 @@
 
     <!-- Game Navigation -->
     <nav class="game-nav">
-        <button class="nav-btn active" onclick="switchGame('streams')">
+        <button class="nav-btn active" onclick="setTab('streams')">
             🎲 Streams
         </button>
-        <button class="nav-btn" onclick="switchGame('hotstreak')">
+        <button class="nav-btn" onclick="setTab('hotstreak')">
             🔥 Hot Streak
         </button>
-        <button class="nav-btn" onclick="switchGame('telestrations')">
+        <button class="nav-btn" onclick="setTab('telestrations')">
             ✏️ Telestrations
         </button>
     </nav>
@@ -607,9 +607,9 @@
                     <span><i class="fa-solid fa-layer-group"></i> 남은 카드 pool (뒷면)</span>
                     <div class="options-panel">
                         <strong style="color:#475569;">특수 카드 포함:</strong>
-                        <label><input type="checkbox" id="optStar" checked onchange="resetGame()"> 별(조커)</label>
-                        <label><input type="checkbox" id="optXX" checked onchange="resetGame()"> XX (휴지통)</label>
-                        <label><input type="checkbox" id="optDouble" checked onchange="resetGame()"> 선택 (택1)</label>
+                        <label><input type="checkbox" id="optStar" checked onchange="resetGame()"> 별 카드 (조커)</label>
+                        <label><input type="checkbox" id="optXX" checked onchange="resetGame()"> 휴지통 카드 (2개의 카드 버리기)</label>
+                        <label><input type="checkbox" id="optDouble" checked onchange="resetGame()"> 선택 카드 (2개의 카드 중 택1)</label>
                     </div>
                     <span class="status-badge" id="remainingCountText">남은 카드: 42장</span>
                 </div>
@@ -666,7 +666,7 @@
     <!-- ==================== HOT STREAK PAGE ==================== -->
     <div id="hotstreak" class="game-page">
         <header>
-            <p>달리고 넘어지고 치열한 레이싱에 배팅해보세요!</p>
+            <p>달리고 넘어지고 치열한 레이싱에 배팅해보세요! 소리를 질러도 됩니다!!</p>
         </header>
 
         <!-- Hot Streak Boardgame React App Root Container -->
@@ -676,7 +676,7 @@
     <!-- ==================== TELESTRATIONS PAGE ==================== -->
     <div id="telestrations" class="game-page">
         <header>
-            <p>그림으로 전달되는 엉뚱발랄 스피드게임을 즐겨보세요!</p>
+            <p>그림으로 전달되는 엉뚱발랄 스피드 게임을 즐겨보세요!</p>
         </header>
 
         <div class="container">
@@ -698,13 +698,40 @@
 
     <!-- Navigation Switcher Script -->
     <script>
-        function switchGame(gameId) {
+        function getTab() {
+            const params = new URLSearchParams(window.location.search);
+            return params.get('tab') || 'streams';
+        }
+
+        function setTab(gameId) {
+            const params = new URLSearchParams();
+            params.set('tab', gameId);
+            window.history.pushState({}, '', `?${params.toString()}`);
+            switchToGame(gameId);
+        }
+
+        function switchToGame(gameId) {
             document.querySelectorAll('.game-page').forEach(page => page.classList.remove('active'));
             document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
 
             document.getElementById(gameId).classList.add('active');
-            event.currentTarget.classList.add('active');
+
+            const btnMap = { streams: 0, hotstreak: 1, telestrations: 2 };
+            const index = btnMap[gameId];
+            if (index !== undefined) {
+                document.querySelectorAll('.nav-btn')[index].classList.add('active');
+            }
         }
+
+        // 페이지 로드 시 URL의 탭 적용
+        window.addEventListener('load', () => {
+            switchToGame(getTab());
+        });
+
+        // 뒤로가기/앞으로가기 처리
+        window.addEventListener('popstate', () => {
+            switchToGame(getTab());
+        });
     </script>
 
     <!-- ==================== STREAMS & TELESTRATIONS LOGIC ==================== -->
@@ -931,7 +958,7 @@
                 } else if (card.isDoubleEffect) {
                     item.classList.add('is-double-effect');
                     valClass = 'double-effect';
-                    badgeHtml = `<span class="effect-badge badge-double">2 중 택1</span>`
+                    badgeHtml = `<span class="effect-badge badge-double">2카드 중 택1</span>`
                 }
 
                 //let badgeHtml = card.isDoubleEffect ? `<span class="effect-badge badge-double">2 중 택1</span>` : '';
@@ -1024,18 +1051,97 @@
         const { useState, useEffect, useRef } = React;
 
         const MASCOTS = [
-            { id: 'hotdog', name: '🌭 핫도그', color: 'bg-red-500' },
-            { id: 'bear', name: '🐻 곰돌이', color: 'bg-amber-600' },
-            { id: 'duck', name: '🦆 오리', color: 'bg-yellow-400' },
-            { id: 'rabbit', name: '🐰 토끼', color: 'bg-pink-400' }
+            { id: 'hotdog', name: '🌭 헐리', strokeColor: '#ef4444', bgColor: '#fed7aa' },
+            { id: 'bear', name: '🐻 고블러', strokeColor: '#a855f7', bgColor: '#fb923c' },
+            { id: 'duck', name: '🐠 댕글', strokeColor: '#14b8a6', bgColor: '#1e3a8a' },
+            { id: 'rabbit', name: '👑 멈', strokeColor: '#92400e', bgColor: '#fcd34d' }
         ];
 
-        const CARDS = [
-            { id: 'f2', label: '🚀 +2칸 전진', val: 2 },
-            { id: 'f1', label: '🏃 +1칸 전진', val: 1 },
-            { id: 'b1', label: '🍌 -1칸 후퇴', val: -1 },
-            { id: 'stop', label: '🛑 얼음 (0)', val: 0 }
-        ];
+        // 배팅 타일 (각 마스코트별 3장 스택: 위부터 1, 2, 3)
+        const BETTING_TILES = {
+            hotdog: [
+                { id: 1, safe: { 1: 10, 2: 7, 3: 5 }, risky: { 1: 15, 2: 5, 3: 2 } },
+                { id: 2, safe: { 1: 7, 2: 5, 3: 3 }, risky: { 1: 11, 2: 3, 3: 1 } },
+                { id: 3, safe: { 1: 5, 2: 3, 3: 2 }, risky: { 1: 8, 2: 2, 3: 0 } }
+            ],
+            bear: [
+                { id: 1, safe: { 1: 10, 2: 7, 3: 5 }, risky: { 1: 15, 2: 5, 3: 2 } },
+                { id: 2, safe: { 1: 7, 2: 5, 3: 3 }, risky: { 1: 11, 2: 3, 3: 1 } },
+                { id: 3, safe: { 1: 5, 2: 3, 3: 2 }, risky: { 1: 8, 2: 2, 3: 0 } }
+            ],
+            duck: [
+                { id: 1, safe: { 1: 10, 2: 7, 3: 5 }, risky: { 1: 15, 2: 5, 3: 2 } },
+                { id: 2, safe: { 1: 7, 2: 5, 3: 3 }, risky: { 1: 11, 2: 3, 3: 1 } },
+                { id: 3, safe: { 1: 5, 2: 3, 3: 2 }, risky: { 1: 8, 2: 2, 3: 0 } }
+            ],
+            rabbit: [
+                { id: 1, safe: { 1: 10, 2: 7, 3: 5 }, risky: { 1: 15, 2: 5, 3: 2 } },
+                { id: 2, safe: { 1: 7, 2: 5, 3: 3 }, risky: { 1: 11, 2: 3, 3: 1 } },
+                { id: 3, safe: { 1: 5, 2: 3, 3: 2 }, risky: { 1: 8, 2: 2, 3: 0 } }
+            ]
+        };
+
+        const createCards = () => {
+            const allCards = [];
+            const cardTemplates = [
+                { name: '똑바로 그후에 1칸 (기본 카드)', emoji: '⬆️', effect: 'straighten' },
+                { name: '별', emoji: '⭐', effect: 'star' },
+                { name: '넘어짐', emoji: '💥', effect: 'fallen' },
+                { name: '뒤돌아', emoji: '🔄', effect: 'turnAround' },
+                { name: '2칸 후퇴', emoji: '⬅️', effect: 'retreat2' },
+                { name: '2칸 전진', emoji: '➡️', effect: 'forward2' },
+                { name: '3칸 전진', emoji: '⤴️', effect: 'forward3' },
+                { name: '1칸 + 엇나감', emoji: '↗️', effect: 'forward1Stumble' },
+                { name: '2칸 + 엇나감', emoji: '⤴️', effect: 'forward2Stumble' },
+                { name: '3칸 + 엇나감', emoji: '⤴️', effect: 'forward3Stumble' }
+            ];
+
+            // 각 마스코트별 10개 카드
+            MASCOTS.forEach(mascot => {
+                cardTemplates.forEach((tmpl, idx) => {
+                    allCards.push({
+                        id: `${mascot.id}_${idx}`,
+                        name: tmpl.name,
+                        emoji: tmpl.emoji,
+                        effect: tmpl.effect,
+                        mascotId: mascot.id,
+                        isUniversal: false,
+                        color: mascot.strokeColor,
+                        bgColor: mascot.bgColor
+                    });
+                });
+            });
+
+            // 모두 적용 카드 9개 (초록색)
+            const universalCards = [
+                { name: '2칸 후퇴', emoji: '⬅️', effect: 'retreat2' },
+                { name: '1칸 전진', emoji: '⬆️', effect: 'forward1' },
+                { name: '1칸 전진', emoji: '⬆️', effect: 'forward1' },
+                { name: '2칸 전진', emoji: '⬆️⬆️', effect: 'forward2' },
+                { name: '2칸 전진', emoji: '⬆️⬆️', effect: 'forward2' },
+                { name: '3칸 전진', emoji: '⬆️⬆️⬆️', effect: 'forward3' },
+                { name: '3칸 전진', emoji: '⬆️⬆️⬆️', effect: 'forward3' },
+                { name: '똑바로 그 후에 2칸 전진', emoji: '↗️', effect: 'straightenForward2' },
+                { name: '똑바로 그 후에 3칸 전진', emoji: '⤴️', effect: 'straightenForward3' }
+            ];
+
+            universalCards.forEach((tmpl, idx) => {
+                allCards.push({
+                    id: `universal_${idx}`,
+                    name: tmpl.name,
+                    emoji: tmpl.emoji,
+                    effect: tmpl.effect,
+                    mascotId: 'all',
+                    isUniversal: true,
+                    color: '#15803d',
+                    bgColor: '#86efac'
+                });
+            });
+
+            return allCards;
+        };
+
+        const CARDS = createCards();
 
         function HotStreakApp() {
             const [role, setRole] = useState(null); // 'host' | 'client'
@@ -1044,27 +1150,115 @@
             const [teamNo, setTeamNo] = useState(1);
 
             // State for Host
+            const [teamsCount, setTeamsCount] = useState(null); // null = 입력 대기, 1-8 = 게임 진행
+            const [teamsInput, setTeamsInput] = useState('3'); // 입력창 value
+
             const [teamsData, setTeamsData] = useState(
-                Array.from({ length: 8 }, (_, i) => ({
+                Array.from({ length: 4 }, (_, i) => ({
                     id: i + 1,
                     connected: false,
                     bet: null,
+                    bettingTiles: [], // 선택한 배팅 타일들 (최대 2개)
                     card: null,
-                    score: 100
+                    score: 100,
+                    clientCards: []
                 }))
             );
-            const [gamePhase, setGamePhase] = useState('BETTING'); // BETTING, CARD, RACE, RESULT
-            const [mascotPositions, setMascotPositions] = useState({ hotdog: 0, bear: 0, duck: 0, rabbit: 0 });
+            const [gamePhase, setGamePhase] = useState('WAITING'); // WAITING, BETTING, CARD, RACE, RESULT
+            const [mascotStates, setMascotStates] = useState({
+                hotdog: { position: 0, direction: 1, isFallen: false },
+                bear: { position: 0, direction: 1, isFallen: false },
+                duck: { position: 0, direction: 1, isFallen: false },
+                rabbit: { position: 0, direction: 1, isFallen: false }
+            });
+            const [baseDeck, setBaseDeck] = useState([]); // 기본 카드 4개
+            const [randomDeck, setRandomDeck] = useState([]); // 랜덤 카드
+            const [deck, setDeck] = useState([]); // 전체 덱
             const [round, setRound] = useState(1);
+
+            // 배팅 타일 사용 현황 (mascotId -> 다음에 가져갈 타일 인덱스)
+            const [usedBettingTiles, setUsedBettingTiles] = useState({
+                hotdog: 0, bear: 0, duck: 0, rabbit: 0
+            });
+
+            // 배팅 순서 관리
+            const [bettingRound, setBettingRound] = useState(null); // null, 'FIRST', 'SECOND'
+            const [currentBettingTeamIndex, setCurrentBettingTeamIndex] = useState(0); // 0 = 1조, 1 = 2조, etc
+
+            // 점수 입력 관리
+            const [scoreInputs, setScoreInputs] = useState({});
+
+            // 직접 제어 모드
+            const [isDirectControl, setIsDirectControl] = useState(false);
+            const [selectedMascotId, setSelectedMascotId] = useState(null);
+
+            // 팀 초기화 함수 (모든 state 선언 후)
+            const initializeTeams = (count) => {
+                setTeamsCount(count);
+                setTeamsData(
+                    Array.from({ length: count }, (_, i) => ({
+                        id: i + 1,
+                        connected: false,
+                        bet: null,
+                        bettingTiles: [],
+                        card: null,
+                        score: 100,
+                        clientCards: []
+                    }))
+                );
+
+                // 배팅 상태 초기화
+                setBettingRound(null);
+                setCurrentBettingTeamIndex(0);
+
+                // 게임 시작 시 기본 카드만 준비
+                const newBaseDeck = [];
+                MASCOTS.forEach(mascot => {
+                    const straightenCard = CARDS.find(c => c.mascotId === mascot.id && c.effect === 'straighten');
+                    if (straightenCard) {
+                        newBaseDeck.push(straightenCard);
+                    }
+                });
+                setBaseDeck(newBaseDeck);
+                setRandomDeck([]);
+                setDeck(newBaseDeck);
+            };
 
             // PeerJS refs
             const peerRef = useRef(null);
             const connRef = useRef(null);
             const connectionsRef = useRef({});
+            const teamConnectionsRef = useRef({}); // teamNo -> connection 맵
+
+            // Client state
+            const [receivedCards, setReceivedCards] = useState([]);
+            const [selectedBettingMascot, setSelectedBettingMascot] = useState(null); // 배팅할 마스코트 선택
+            const [hostCurrentBettingTeamIndex, setHostCurrentBettingTeamIndex] = useState(0); // 호스트의 현재 배팅 팀
+            const [allTeamsBettingTiles, setAllTeamsBettingTiles] = useState([]); // 모든 팀의 배팅 타일
+
+            // RECEIVE_CARDS 메시지 처리 (Client)
+            useEffect(() => {
+                if (!connRef.current || role !== 'client') return;
+
+                const handleData = (data) => {
+                    if (data.type === 'PHASE_CHANGE') {
+                        setGamePhase(data.phase);
+                    } else if (data.type === 'RECEIVE_CARDS') {
+                        setReceivedCards(data.cards || []);
+                    } else if (data.type === 'BETTING_UPDATE') {
+                        setHostCurrentBettingTeamIndex(data.currentBettingTeamIndex);
+                        setAllTeamsBettingTiles(data.teamsData || []);
+                    } else if (data.type === 'SCORE_UPDATE') {
+                        setTeamsData(prev => prev.map(t => t.id === data.teamNo ? { ...t, score: data.newScore } : t));
+                    }
+                };
+
+                connRef.current.on('data', handleData);
+            }, [role]);
 
             // Host Peer Init
             const initHost = () => {
-                const id = Math.floor(1000 + Math.random() * 9000);
+                const id = Math.floor(Math.random() * 10);
                 const peer = new Peer(id);
                 peerRef.current = peer;
 
@@ -1075,6 +1269,9 @@
 
                 peer.on('connection', (conn) => {
                     conn.on('data', (data) => {
+                        if (data.type === 'JOIN') {
+                            teamConnectionsRef.current[data.teamNo] = conn;
+                        }
                         handleClientData(data);
                     });
 
@@ -1102,6 +1299,11 @@
                     conn.on('data', (data) => {
                         if (data.type === 'PHASE_CHANGE') {
                             setGamePhase(data.phase);
+                        } else if (data.type === 'RECEIVE_CARDS') {
+                            setReceivedCards(data.cards || []);
+                        } else if (data.type === 'BETTING_UPDATE') {
+                            setHostCurrentBettingTeamIndex(data.currentBettingTeamIndex);
+                            setAllTeamsBettingTiles(data.teamsData || []);
                         }
                     });
                 });
@@ -1113,6 +1315,28 @@
                     setTeamsData(prev => prev.map(t => t.id === data.teamNo ? { ...t, connected: true } : t));
                 } else if (data.type === 'SUBMIT_BET') {
                     setTeamsData(prev => prev.map(t => t.id === data.teamNo ? { ...t, bet: data.bet } : t));
+                } else if (data.type === 'SUBMIT_BETTING_TILE') {
+                    // 새 teamsData 계산
+                    const newTeamsData = teamsData.map(t =>
+                        t.id === data.teamNo
+                            ? { ...t, bettingTiles: [...t.bettingTiles, data.bettingTile] }
+                            : t
+                    );
+
+                    // teamsData 업데이트
+                    setTeamsData(newTeamsData);
+
+                    // 배팅 정보 브로드캐스트
+                    Object.values(teamConnectionsRef.current).forEach(conn => {
+                        if (conn && conn.open) {
+                            conn.send({
+                                type: 'BETTING_UPDATE',
+                                currentBettingTeamIndex: currentBettingTeamIndex,
+                                bettingRound: bettingRound,
+                                teamsData: newTeamsData.map(t => ({ id: t.id, bettingTiles: t.bettingTiles }))
+                            });
+                        }
+                    });
                 } else if (data.type === 'SUBMIT_CARD') {
                     setTeamsData(prev => prev.map(t => t.id === data.teamNo ? { ...t, card: data.card } : t));
                 }
@@ -1120,32 +1344,214 @@
 
             const broadcastPhase = (phase) => {
                 setGamePhase(phase);
-                Object.values(connectionsRef.current).forEach(conn => {
-                    if (conn.open) conn.send({ type: 'PHASE_CHANGE', phase });
+                Object.values(teamConnectionsRef.current).forEach(conn => {
+                    if (conn && conn.open) conn.send({ type: 'PHASE_CHANGE', phase });
                 });
+            };
+
+            // 배팅 정보 브로드캐스트 (현재 배팅 팀, 선택된 타일)
+            const broadcastBettingUpdate = () => {
+                Object.values(teamConnectionsRef.current).forEach(conn => {
+                    if (conn && conn.open) {
+                        conn.send({
+                            type: 'BETTING_UPDATE',
+                            currentBettingTeamIndex,
+                            bettingRound,
+                            teamsData: teamsData.map(t => ({ id: t.id, bettingTiles: t.bettingTiles }))
+                        });
+                    }
+                });
+            };
+
+            // 랜덤 카드 뽑기
+            const drawRandomCards = () => {
+                const cardCount = getCardCount(teamsCount);
+
+                // straighten을 제외한 카드에서 cardCount만큼 랜덤 뽑기
+                const nonStraightenCards = CARDS.filter(c => c.effect !== 'straighten').sort(() => Math.random() - 0.5);
+                const newRandomDeck = nonStraightenCards.slice(0, cardCount);
+                setRandomDeck(newRandomDeck);
+
+                // 전체 덱 = 기본 + 랜덤
+                setDeck([...baseDeck, ...newRandomDeck]);
+            };
+
+            // 각 조에 3장씩 카드 나눠주기
+            const distributeCardsToTeams = () => {
+                // 이미 공개된 카드들의 ID를 수집
+                const usedCardIds = new Set();
+                deck.forEach(card => {
+                    usedCardIds.add(`${card.mascotId}_${card.effect}_${card.name}`);
+                });
+
+                // 아직 공개되지 않은 카드들
+                const remainingCards = CARDS.filter(card => {
+                    return !usedCardIds.has(`${card.mascotId}_${card.effect}_${card.name}`);
+                });
+
+                // 각 팀에게 3장씩 나눠주기
+                const updatedTeamsData = teamsData.map(team => {
+                    const clientCards = [];
+                    for (let i = 0; i < 3 && remainingCards.length > 0; i++) {
+                        const randomIndex = Math.floor(Math.random() * remainingCards.length);
+                        clientCards.push(remainingCards[randomIndex]);
+                        remainingCards.splice(randomIndex, 1);
+                    }
+                    return { ...team, clientCards };
+                });
+
+                setTeamsData(updatedTeamsData);
+
+                // PeerJS로 각 Client에 카드 전송
+                updatedTeamsData.forEach(team => {
+                    const conn = teamConnectionsRef.current[team.id];
+                    if (conn && conn.open) {
+                        conn.send({
+                            type: 'RECEIVE_CARDS',
+                            cards: team.clientCards
+                        });
+                    }
+                });
+            };
+
+            // 라운드 시작 시 덱 준비
+            const prepareDeck = () => {
+                const cardCount = getCardCount(teamsCount);
+
+                // 1. 기본 카드 4개 (변하지 않음)
+                const newBaseDeck = [];
+                MASCOTS.forEach(mascot => {
+                    const straightenCard = CARDS.find(c => c.mascotId === mascot.id && c.effect === 'straighten');
+                    if (straightenCard) {
+                        newBaseDeck.push(straightenCard);
+                    }
+                });
+                setBaseDeck(newBaseDeck);
+
+                // 2. straighten을 제외한 카드에서 cardCount만큼 랜덤 뽑기
+                const nonStraightenCards = CARDS.filter(c => c.effect !== 'straighten').sort(() => Math.random() - 0.5);
+                const newRandomDeck = nonStraightenCards.slice(0, cardCount);
+                setRandomDeck(newRandomDeck);
+
+                // 3. 전체 덱 = 기본 + 랜덤
+                setDeck([...newBaseDeck, ...newRandomDeck]);
+            };
+
+            const applyCardEffect = (mascotId, card, currentState) => {
+                const state = { ...currentState };
+                const FINISH = 11;
+
+                const applyMovement = (distance) => {
+                    if (state.isFallen) {
+                        state.position += Math.min(1, Math.abs(distance)) * Math.sign(distance);
+                    } else {
+                        state.position += distance * state.direction;
+                    }
+                    state.position = Math.max(0, Math.min(FINISH, state.position));
+                    state.isFallen = false;
+                };
+
+                switch (card.effect) {
+                    case 'straighten':
+                        state.isFallen = false;
+                        applyMovement(1);
+                        break;
+                    case 'star':
+                        const nextStar = Math.ceil(state.position / 5) * 5;
+                        state.position = Math.min(FINISH, nextStar);
+                        state.isFallen = false;
+                        break;
+                    case 'fallen':
+                        state.isFallen = true;
+                        break;
+                    case 'turnAround':
+                        state.direction *= -1;
+                        break;
+                    case 'retreat2':
+                        applyMovement(-2);
+                        break;
+                    case 'forward2':
+                        applyMovement(2);
+                        break;
+                    case 'forward3':
+                        applyMovement(3);
+                        break;
+                    case 'forward1Stumble':
+                        applyMovement(1);
+                        state.position += 0.5;
+                        break;
+                    case 'forward2Stumble':
+                        applyMovement(2);
+                        state.position += 0.5;
+                        break;
+                    case 'forward3Stumble':
+                        applyMovement(3);
+                        state.position += 0.5;
+                        break;
+                    case 'forward1':
+                        applyMovement(1);
+                        break;
+                    case 'straightenForward2':
+                        state.isFallen = false;
+                        applyMovement(1); // 똑바로
+                        applyMovement(2); // 2칸 전진
+                        break;
+                    case 'straightenForward3':
+                        state.isFallen = false;
+                        applyMovement(1); // 똑바로
+                        applyMovement(3); // 3칸 전진
+                        break;
+                }
+                return state;
+            };
+
+            // 참여 조의 수에 따라 사용할 카드 수 결정
+            const getCardCount = (count) => {
+                const cardMap = { 3: 11, 4: 10, 5: 9, 6: 8, 7: 7, 8: 6 };
+                return cardMap[count] || 10;
+            };
+
+            // Shuffle deck
+            const shuffleDeck = () => {
+                const newDeck = [...CARDS];
+                for (let i = newDeck.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [newDeck[i], newDeck[j]] = [newDeck[j], newDeck[i]];
+                }
+                setDeck(newDeck);
             };
 
             // Run Race Simulation
             const runRace = () => {
                 broadcastPhase('RACE');
-                let newPos = { ...mascotPositions };
+                const cardCount = getCardCount(teamsCount);
+                const fullDeck = deck.length > 0 ? deck : [...CARDS].sort(() => Math.random() - 0.5);
+                const deckToUse = fullDeck.slice(0, cardCount);
+                let newStates = { ...mascotStates };
+                let deckIndex = 0;
 
-                // Apply Card Effects
-                teamsData.forEach(t => {
-                    if (t.card) {
-                        const cardObj = CARDS.find(c => c.id === t.card.cardId);
-                        if (cardObj && newPos[t.card.mascotId] !== undefined) {
-                            newPos[t.card.mascotId] = Math.max(0, Math.min(10, newPos[t.card.mascotId] + cardObj.val));
+                // Draw cards and apply effects for each mascot
+                MASCOTS.forEach(mascot => {
+                    let card = null;
+                    while (deckIndex < deckToUse.length && !card) {
+                        const drawn = deckToUse[deckIndex++];
+                        if (drawn.mascotId === mascot.id || drawn.isUniversal) {
+                            card = drawn;
                         }
+                    }
+                    if (card && newStates[mascot.id]) {
+                        newStates[mascot.id] = applyCardEffect(mascot.id, card, newStates[mascot.id]);
                     }
                 });
 
                 // Animate Race
                 setTimeout(() => {
-                    setMascotPositions(newPos);
+                    setMascotStates(newStates);
 
                     // Calculate Winner
-                    const sorted = Object.entries(newPos).sort((a, b) => b[1] - a[1]);
+                    const sorted = Object.entries(newStates)
+                        .map(([id, state]) => [id, state.position])
+                        .sort((a, b) => b[1] - a[1]);
                     const winnerId = sorted[0][0];
 
                     // Calculate Scores
@@ -1161,10 +1567,21 @@
             };
 
             const nextRound = () => {
-                setMascotPositions({ hotdog: 0, bear: 0, duck: 0, rabbit: 0 });
-                setTeamsData(prev => prev.map(t => ({ ...t, bet: null, card: null })));
+                setMascotStates({
+                    hotdog: { position: 0, direction: 1, isFallen: false },
+                    bear: { position: 0, direction: 1, isFallen: false },
+                    duck: { position: 0, direction: 1, isFallen: false },
+                    rabbit: { position: 0, direction: 1, isFallen: false }
+                });
+                setTeamsData(prev => prev.map(t => ({ ...t, bet: null, card: null, bettingTiles: [], clientCards: [] })));
+                setUsedBettingTiles({ hotdog: 0, bear: 0, duck: 0, rabbit: 0 });
+                setBettingRound(null);
+                setCurrentBettingTeamIndex(0);
+                setReceivedCards([]);
+                setSelectedBettingMascot(null);
                 setRound(r => r + 1);
-                broadcastPhase('BETTING');
+                prepareDeck();
+                broadcastPhase('WAITING');
             };
 
             // Selection Screen
@@ -1204,49 +1621,236 @@
                 );
             }
 
+            // HOST TEAMS SETUP SCREEN
+            if (role === 'host' && teamsCount === null) {
+                return (
+                    <div className="flex flex-col items-center justify-center p-8 min-h-[600px]">
+                        <div className="bg-slate-800 p-8 rounded-2xl border border-slate-700 w-full max-w-md">
+                            <h1 className="text-3xl font-bold text-amber-400 mb-2 text-center">🔥 Hot Streak</h1>
+                            <p className="text-slate-400 text-center mb-8">레이싱에 참여할 조의 개수를 입력하세요</p>
+
+                            <div className="flex flex-col gap-4">
+                                <div>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <label className="block text-sm font-bold text-slate-300">참여 조의 개수 (3-8)</label>
+                                        <span className="text-xs bg-amber-500/20 text-amber-300 px-2 py-1 rounded">
+                                            🃏 사용 카드: {getCardCount(parseInt(teamsInput))}장
+                                        </span>
+                                    </div>
+                                    <input
+                                        type="number"
+                                        min="3"
+                                        max="8"
+                                        value={teamsInput}
+                                        onChange={e => setTeamsInput(Math.min(8, Math.max(3, parseInt(e.target.value) || 3)).toString())}
+                                        className="w-full p-3 bg-slate-700 border border-slate-600 rounded-lg text-white text-center text-2xl font-bold focus:outline-none focus:border-amber-400"
+                                    />
+                                </div>
+
+                                <div className="grid grid-cols-3 gap-2 mt-4">
+                                    {Array.from({ length: 6 }, (_, i) => (
+                                        <button
+                                            key={i + 3}
+                                            onClick={() => setTeamsInput((i + 3).toString())}
+                                            className={`p-3 rounded-lg font-bold transition ${
+                                                parseInt(teamsInput) === i + 3
+                                                    ? 'bg-amber-500 text-slate-900'
+                                                    : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                                            }`}
+                                        >
+                                            {i + 3}
+                                        </button>
+                                    ))}
+                                </div>
+
+                                <button
+                                    onClick={() => initializeTeams(parseInt(teamsInput))}
+                                    className="w-full bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold py-4 rounded-lg text-lg transition mt-6"
+                                >
+                                    시작하기 →
+                                </button>
+                            </div>
+
+                            <p className="text-xs text-slate-500 text-center mt-6">
+                                접속 코드: <span className="font-mono font-bold text-slate-400">{peerId}</span>
+                            </p>
+                        </div>
+                    </div>
+                );
+            }
+
             // HOST DISPLAY
-            if (role === 'host') {
+            if (role === 'host' && teamsCount !== null) {
                 return (
                     <div className="p-6 max-w-7xl mx-auto flex flex-col gap-6">
                         {/* Header & Control Panel */}
                         <div className="bg-slate-800 p-4 rounded-xl flex flex-wrap justify-between items-center gap-4 border border-slate-700">
                             <div>
                                 <h1 className="text-2xl font-bold text-amber-400">🔥 Hot Streak [Round {round}]</h1>
-                                <p className="text-sm text-slate-400">접속 코드: <span className="text-white font-mono font-bold">{peerId}</span></p>
+                                <p className="text-sm text-slate-400">
+                                    접속 코드: <span className="text-white font-mono font-bold">{peerId}</span>
+                                    <span className="mx-2">•</span>
+                                    참여 조: <span className="text-white font-bold">{teamsCount}개</span>
+                                    <span className="mx-2">•</span>
+                                    사용 카드: <span className="text-amber-300 font-bold">🃏 {getCardCount(teamsCount)}장</span>
+                                </p>
                             </div>
-                            <div className="flex gap-2">
-                                {gamePhase === 'BETTING' && (
-                                    <button onClick={() => broadcastPhase('CARD')} className="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg font-bold transition">카드 제출 단계로</button>
+                            <div className="flex flex-col gap-3">
+                                {/* 카드 준비 */}
+                                {gamePhase === 'WAITING' && (
+                                    <div className="flex gap-2 flex-wrap">
+                                        <button onClick={drawRandomCards} className="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg font-bold transition">🎲 랜덤 카드 뽑기</button>
+                                        <button onClick={distributeCardsToTeams} className="bg-purple-600 hover:bg-purple-500 px-4 py-2 rounded-lg font-bold transition">🎁 3장 카드 나눠주기</button>
+                                    </div>
                                 )}
-                                {gamePhase === 'CARD' && (
-                                    <button onClick={runRace} className="bg-rose-600 hover:bg-rose-500 px-4 py-2 rounded-lg font-bold transition">🏎️ 레이스 시작!</button>
-                                )}
-                                {gamePhase === 'RESULT' && (
-                                    <button onClick={nextRound} className="bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-lg font-bold transition">다음 라운드 ➡️</button>
+
+
+                                {/* 경기 시작 및 제어 */}
+                                <div className="flex gap-2 flex-wrap">
+                                    {gamePhase === 'BETTING' && teamsData.every(t => t.bettingTiles.length === 2) && (
+                                        <button onClick={() => {
+                                            setGamePhase('RACE');
+                                            runRace();
+                                        }} className="bg-rose-600 hover:bg-rose-500 px-4 py-2 rounded-lg font-bold transition">
+                                            🏎️ 경기 시작!
+                                        </button>
+                                    )}
+                                    <button onClick={nextRound} className="bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-lg font-bold transition">
+                                        다음 라운드 ➡️
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Card Deck */}
+                        <div className="bg-slate-800 p-6 rounded-xl border border-slate-700">
+                            <h2 className="text-xl font-bold mb-4">🃏 이번 라운드 카드 덱 ({deck.length}장)</h2>
+                            <div className="flex flex-col gap-3">
+                                {deck.length > 0 ? (
+                                    <>
+                                        {/* 각 마스코트별 카드 */}
+                                        {MASCOTS.map(mascot => {
+                                            const mascotCards = deck.filter(c => c.mascotId === mascot.id);
+                                            return mascotCards.length > 0 ? (
+                                                <div key={mascot.id}>
+                                                    <div className="text-xs text-slate-400 mb-2">{mascot.name}</div>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {mascotCards.map((card, idx) => (
+                                                            <div
+                                                                key={idx}
+                                                                className="px-3 py-2 rounded-lg text-sm font-bold flex items-center gap-2 border-2"
+                                                                style={{
+                                                                    backgroundColor: mascot.bgColor,
+                                                                    borderColor: mascot.strokeColor,
+                                                                    color: mascot.strokeColor
+                                                                }}
+                                                            >
+                                                                <span>{card.emoji}</span>
+                                                                <span>{card.name}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            ) : null;
+                                        })}
+
+                                        {/* 모두 적용 카드 */}
+                                        {deck.filter(c => c.isUniversal).length > 0 && (
+                                            <div>
+                                                <div className="text-xs text-slate-400 mb-2">🌍 모두 적용</div>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {deck.filter(c => c.isUniversal).map((card, idx) => (
+                                                        <div
+                                                            key={idx}
+                                                            className="px-3 py-2 rounded-lg text-sm font-bold flex items-center gap-2 border-2"
+                                                            style={{
+                                                                backgroundColor: '#15803d',
+                                                                borderColor: '#86efac',
+                                                                color: '#86efac'
+                                                            }}
+                                                        >
+                                                            <span>{card.emoji}</span>
+                                                            <span>{card.name}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </>
+                                ) : (
+                                    <p className="text-slate-400">카드 준비 중...</p>
                                 )}
                             </div>
                         </div>
 
                         {/* Race Track */}
                         <div className="bg-slate-800 p-6 rounded-xl border border-slate-700">
-                            <h2 className="text-xl font-bold mb-4">🏟️ 경기장</h2>
+                            <h2 className="text-xl font-bold mb-4">🏟️ 경기장 {isDirectControl && selectedMascotId && `(${MASCOTS.find(m => m.id === selectedMascotId)?.name} 선택)`}</h2>
                             <div className="flex flex-col gap-4">
                                 {MASCOTS.map(m => (
                                     <div key={m.id} className="flex items-center gap-4">
-                                        <span className="w-24 font-bold">{m.name}</span>
-                                        <div className="flex-1 bg-slate-700 h-10 rounded-lg relative overflow-hidden flex items-center px-2">
-                                            {/* Track Grid */}
-                                            <div className="absolute inset-0 grid grid-cols-11 pointer-events-none opacity-20">
-                                                {Array.from({ length: 11 }).map((_, i) => (
-                                                    <div key={i} className="border-r border-white"></div>
-                                                ))}
+                                        <span
+                                            className={`w-24 font-bold transition ${
+                                                isDirectControl
+                                                    ? 'cursor-pointer hover:text-amber-300'
+                                                    : ''
+                                            } ${selectedMascotId === m.id ? 'text-amber-400 ring-2 ring-amber-400 px-2 py-1 rounded' : ''}`}
+                                            onClick={() => {
+                                                if (isDirectControl) {
+                                                    setSelectedMascotId(selectedMascotId === m.id ? null : m.id);
+                                                }
+                                            }}
+                                        >
+                                            {m.name}
+                                        </span>
+                                        <div className="flex-1 bg-slate-700 h-14 rounded-lg relative overflow-hidden px-1">
+                                            {/* Track Grid with Numbers and Stars */}
+                                            <div className="absolute inset-0 flex items-stretch pointer-events-none">
+                                                {Array.from({ length: 14 }).map((_, i) => {
+                                                    const position = i - 2;
+                                                    const hasStar = position === 5 || position === 10 || position === 11;
+                                                    const isStart = position === 0;
+
+                                                    return (
+                                                        <div
+                                                            key={i}
+                                                            className={`flex-1 flex flex-col items-center justify-center text-xs font-bold border-r border-slate-500 cursor-pointer hover:bg-slate-500/50 transition ${
+                                                                hasStar ? 'bg-slate-600' : isStart ? 'bg-slate-500' : ''
+                                                            } ${
+                                                                isDirectControl && selectedMascotId === m.id ? 'pointer-events-auto' : 'pointer-events-none'
+                                                            }`}
+                                                            onClick={() => {
+                                                                if (isDirectControl && selectedMascotId === m.id) {
+                                                                    setMascotStates(prev => ({
+                                                                        ...prev,
+                                                                        [m.id]: {
+                                                                            ...prev[m.id],
+                                                                            position: Math.min(position, 11)
+                                                                        }
+                                                                    }));
+                                                                }
+                                                            }}
+                                                        >
+                                                            <span className="text-white">{position}</span>
+                                                            {hasStar && <span className="text-lg leading-none">⭐</span>}
+                                                        </div>
+                                                    );
+                                                })}
                                             </div>
+
                                             {/* Mascot Marker */}
                                             <div
-                                                className={`h-8 w-8 rounded-full ${m.color} flex items-center justify-center font-bold text-xs transition-all duration-700 shadow-md text-white`}
-                                                style={{ left: `${(mascotPositions[m.id] / 10) * 90}%`, position: 'relative' }}
+                                                className="absolute top-1/2 transform -translate-y-1/2 h-8 w-8 rounded-full flex items-center justify-center font-bold text-xs transition-all duration-700 shadow-md text-white z-10"
+                                                style={{
+                                                    left: `${((mascotStates[m.id].position + 2) / 14) * 100}%`,
+                                                    marginLeft: '-16px',
+                                                    backgroundColor: m.bgColor,
+                                                    border: `${selectedMascotId === m.id && isDirectControl ? '4px' : '2px'} solid ${m.strokeColor}`,
+                                                    transform: `translateY(-50%) rotateZ(${mascotStates[m.id].isFallen ? 90 : mascotStates[m.id].direction === -1 ? 180 : 0}deg)`,
+                                                    opacity: mascotStates[m.id].isFallen ? 0.6 : 1
+                                                }}
                                             >
-                                                {mascotPositions[m.id]}
+                                                {Math.round(mascotStates[m.id].position * 2) / 2}
                                             </div>
                                         </div>
                                     </div>
@@ -1255,19 +1859,145 @@
                         </div>
 
                         {/* Teams Dashboard */}
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            {teamsData.map(t => (
-                                <div key={t.id} className={`p-4 rounded-xl border ${t.connected ? 'bg-slate-800 border-slate-600' : 'bg-slate-800/40 border-slate-700/50 opacity-50'}`}>
-                                    <div className="flex justify-between items-center mb-2">
-                                        <span className="font-bold text-lg">{t.id}조</span>
-                                        <span className="text-amber-400 font-bold">{t.score} pt</span>
+                        <div className={`grid gap-4 ${
+                            teamsCount <= 2 ? 'grid-cols-1' :
+                            teamsCount <= 4 ? 'grid-cols-2' :
+                            'grid-cols-4'
+                        }`}>
+                            {teamsData.map((t, idx) => {
+                                const isBettingNow = bettingRound && idx === currentBettingTeamIndex;
+                                return (
+                                    <div key={t.id} className={`p-4 rounded-xl border transition ${
+                                        isBettingNow ? 'bg-amber-900/40 border-amber-500 ring-2 ring-amber-500' :
+                                        t.connected ? 'bg-slate-800 border-slate-600' : 'bg-slate-800/40 border-slate-700/50 opacity-50'
+                                    }`}>
+                                        <div className="flex justify-between items-center mb-2">
+                                            <span className="font-bold text-lg">{t.id}조 {isBettingNow && '🎯'}</span>
+                                            <span className="text-amber-400 font-bold">{t.score} pt</span>
+                                        </div>
+                                        <div className="text-xs space-y-1 text-slate-300">
+                                            <div>마스코트: {t.bet ? MASCOTS.find(m => m.id === t.bet)?.name : '⏳ 대기'}</div>
+                                            <div>배팅 타일: {t.bettingTiles.length}/2 선택 {t.bettingTiles.length === 2 ? '✅' : ''}</div>
+
+                                            {/* 선택한 배팅 타일 표시 */}
+                                            {t.bettingTiles.length > 0 && (
+                                                <div className="mt-2 pt-2 border-t border-slate-600 space-y-1">
+                                                    {t.bettingTiles.map((tile, idx) => {
+                                                        const mascot = MASCOTS.find(m => m.id === tile.mascotId);
+                                                        return (
+                                                            <div key={idx} className="text-xs flex items-center gap-1">
+                                                                <span>{mascot?.name}</span>
+                                                                <span>타일#{tile.tileId}</span>
+                                                                <span className={tile.type === 'safe' ? 'text-blue-300' : 'text-red-300'}>
+                                                                    {tile.type === 'safe' ? '🛡️' : '⚡'}
+                                                                </span>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+
+                                            <div>접속: {t.connected ? '✅' : '⏳'}</div>
+                                        </div>
+
+                                        {/* 배팅 제어 버튼 */}
+                                        {(gamePhase === 'WAITING' || gamePhase === 'BETTING') && (
+                                            <div className="mt-4 pt-3 border-t border-slate-600 space-y-2">
+                                                {(gamePhase === 'WAITING' || bettingRound === 'FIRST') && t.bettingTiles.length === 0 && (
+                                                    <button
+                                                        onClick={() => {
+                                                            if (gamePhase === 'WAITING') {
+                                                                setGamePhase('BETTING');
+                                                                broadcastPhase('BETTING');
+                                                            }
+                                                            if (!bettingRound) {
+                                                                setBettingRound('FIRST');
+                                                            }
+                                                            setCurrentBettingTeamIndex(idx);
+                                                            Object.values(teamConnectionsRef.current).forEach(conn => {
+                                                                if (conn && conn.open) {
+                                                                    conn.send({
+                                                                        type: 'BETTING_UPDATE',
+                                                                        currentBettingTeamIndex: idx,
+                                                                        bettingRound: bettingRound || 'FIRST',
+                                                                        teamsData: teamsData.map(t => ({ id: t.id, bettingTiles: t.bettingTiles }))
+                                                                    });
+                                                                }
+                                                            });
+                                                        }}
+                                                        className="w-full bg-amber-600 hover:bg-amber-500 px-2 py-1 rounded text-xs font-bold transition"
+                                                    >
+                                                        배팅 시작
+                                                    </button>
+                                                )}
+                                                {bettingRound === 'SECOND' && t.bettingTiles.length === 1 && (
+                                                    <button
+                                                        onClick={() => {
+                                                            setCurrentBettingTeamIndex(idx);
+                                                            Object.values(teamConnectionsRef.current).forEach(conn => {
+                                                                if (conn && conn.open) {
+                                                                    conn.send({
+                                                                        type: 'BETTING_UPDATE',
+                                                                        currentBettingTeamIndex: idx,
+                                                                        bettingRound: 'SECOND',
+                                                                        teamsData: teamsData.map(t => ({ id: t.id, bettingTiles: t.bettingTiles }))
+                                                                    });
+                                                                }
+                                                            });
+                                                        }}
+                                                        className="w-full bg-orange-600 hover:bg-orange-500 px-2 py-1 rounded text-xs font-bold transition"
+                                                    >
+                                                        배팅 시작
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {/* 점수 입력 */}
+                                        <div className="mt-4 pt-3 border-t border-slate-600">
+                                            <div className="text-xs text-slate-400 mb-2">점수 추가</div>
+                                            <div className="flex gap-2">
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    value={scoreInputs[t.id] || ''}
+                                                    onChange={(e) => setScoreInputs(prev => ({ ...prev, [t.id]: e.target.value }))}
+                                                    placeholder="점수 입력"
+                                                    className="flex-1 px-2 py-1 rounded text-xs bg-slate-700 text-white border border-slate-600 focus:outline-none focus:border-slate-500"
+                                                />
+                                                <button
+                                                    onClick={() => {
+                                                        const score = parseInt(scoreInputs[t.id]) || 0;
+                                                        if (score <= 0) {
+                                                            alert('0보다 큰 숫자를 입력해주세요.');
+                                                            return;
+                                                        }
+                                                        const newTeamsData = teamsData.map(team =>
+                                                            team.id === t.id ? { ...team, score: team.score + score } : team
+                                                        );
+                                                        setTeamsData(newTeamsData);
+                                                        setScoreInputs(prev => ({ ...prev, [t.id]: '' }));
+
+                                                        // 클라이언트에 점수 업데이트 브로드캐스트
+                                                        Object.values(teamConnectionsRef.current).forEach(conn => {
+                                                            if (conn && conn.open) {
+                                                                conn.send({
+                                                                    type: 'SCORE_UPDATE',
+                                                                    teamNo: t.id,
+                                                                    newScore: newTeamsData.find(x => x.id === t.id).score
+                                                                });
+                                                            }
+                                                        });
+                                                    }}
+                                                    className="bg-green-600 hover:bg-green-500 px-3 py-1 rounded text-xs font-bold transition"
+                                                >
+                                                    +점수
+                                                </button>
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div className="text-xs space-y-1 text-slate-300">
-                                        <div>베팅: {t.bet ? MASCOTS.find(m => m.id === t.bet)?.name : '⏳ 대기 중'}</div>
-                                        <div>카드: {t.card ? '✅ 제출 완료' : '⏳ 대기 중'}</div>
-                                    </div>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     </div>
                 );
@@ -1276,6 +2006,52 @@
             // CLIENT DISPLAY
             if (role === 'client') {
                 const myTeam = teamsData.find(t => t.id === Number(teamNo));
+
+                const selectBettingMascot = (mascotId) => {
+                    setSelectedBettingMascot(mascotId);
+                };
+
+                const selectBettingTile = (mascotId, tileType) => {
+                    const tiles = BETTING_TILES[mascotId];
+
+                    // 다른 팀이 선택한 타일 ID 수집
+                    const selectedTileIds = new Set();
+                    allTeamsBettingTiles.forEach(team => {
+                        team.bettingTiles.forEach(tile => {
+                            if (tile.mascotId === mascotId) {
+                                selectedTileIds.add(tile.tileId);
+                            }
+                        });
+                    });
+
+                    // 다음에 선택할 수 있는 타일 찾기
+                    let nextTile = null;
+                    for (let i = 0; i < tiles.length; i++) {
+                        if (!selectedTileIds.has(tiles[i].id)) {
+                            nextTile = tiles[i];
+                            break;
+                        }
+                    }
+
+                    if (!nextTile) {
+                        alert('더 이상 가져갈 수 있는 타일이 없습니다.');
+                        return;
+                    }
+
+                    const tile = nextTile;
+                    const points = tile[tileType];
+
+                    // Host에 전송
+                    if (connRef.current) {
+                        connRef.current.send({
+                            type: 'SUBMIT_BETTING_TILE',
+                            teamNo: Number(teamNo),
+                            bettingTile: { mascotId, tileId: tile.id, type: tileType, points }
+                        });
+                    }
+
+                    setSelectedBettingMascot(null);
+                };
 
                 const sendBet = (mascotId) => {
                     if (connRef.current) connRef.current.send({ type: 'SUBMIT_BET', teamNo: Number(teamNo), bet: mascotId });
@@ -1295,30 +2071,212 @@
                                 <span className="text-sm bg-slate-700 px-3 py-1 rounded-full font-bold">Phase: {gamePhase}</span>
                             </div>
 
-                            {/* BETTING PHASE */}
-                            {gamePhase === 'BETTING' && (
-                                <div>
-                                    <h2 className="text-lg font-bold mb-4">🎯 우승 예상 마스코트에 베팅하세요</h2>
-                                    <div className="grid grid-cols-1 gap-3">
-                                        {MASCOTS.map(m => (
-                                            <button
-                                                key={m.id}
-                                                onClick={() => sendBet(m.id)}
-                                                className={`p-4 rounded-xl font-bold flex justify-between items-center border transition ${myTeam?.bet === m.id ? 'bg-amber-500/20 border-amber-400 text-amber-300' : 'bg-slate-800 border-slate-700'}`}
-                                            >
-                                                <span>{m.name}</span>
-                                                {myTeam?.bet === m.id && <span>SELECTED</span>}
-                                            </button>
-                                        ))}
+                            {/* WAITING PHASE */}
+                            {gamePhase === 'WAITING' && (
+                                <div className="flex flex-col gap-6">
+                                    <div className="text-center py-8">
+                                        <div className="text-6xl mb-4">⏳</div>
+                                        <h2 className="text-2xl font-bold mb-2 text-amber-300">배팅 준비 중</h2>
+                                        <p className="text-slate-400 text-sm">호스트가 준비하고 있습니다...</p>
+                                    </div>
+
+                                    {/* 받은 카드 */}
+                                    {receivedCards.length > 0 && (
+                                        <div className="bg-slate-700/50 p-4 rounded-xl border border-slate-600">
+                                            <h3 className="text-sm font-bold text-amber-300 mb-3">🎁 나눠받은 카드 ({receivedCards.length}장)</h3>
+                                            <div className="grid grid-cols-1 gap-2">
+                                                {receivedCards.map((card, idx) => {
+                                                    const mascot = MASCOTS.find(m => m.id === card.mascotId);
+                                                    const color = card.isUniversal ? '#15803d' : mascot?.strokeColor || '#999';
+                                                    const bgColor = card.isUniversal ? '#86efac' : mascot?.bgColor || '#f3f4f6';
+                                                    return (
+                                                        <div
+                                                            key={idx}
+                                                            className="px-3 py-2 rounded-lg text-sm font-bold flex items-center gap-2 border-2"
+                                                            style={{
+                                                                backgroundColor: bgColor,
+                                                                borderColor: color,
+                                                                color: color
+                                                            }}
+                                                        >
+                                                            <span>{card.emoji}</span>
+                                                            <span>{card.name}</span>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <div className="text-center text-xs text-slate-500 space-y-1">
+                                        <p>✅ 랜덤 카드 뽑기</p>
+                                        <p>✅ 3장 카드 나눠주기</p>
+                                        <p>⏳ 배팅 시작 버튼 대기 중...</p>
                                     </div>
                                 </div>
                             )}
 
-                            {/* CARD PHASE */}
-                            {gamePhase === 'CARD' && (
-                                <div>
-                                    <h2 className="text-lg font-bold mb-4">🃏 레이스에 적용할 카드를 선택하세요</h2>
-                                    <CardSelection MASCOTS={MASCOTS} CARDS={CARDS} onSubmit={sendCard} currentCard={myTeam?.card} />
+                            {/* BETTING PHASE */}
+                            {gamePhase === 'BETTING' && (
+                                <div className="flex flex-col gap-6">
+                                    {/* 현재 배팅 팀 표시 */}
+                                    <div className="text-center bg-slate-700/50 p-3 rounded-lg">
+                                        <p className="text-xs text-slate-400">현재 배팅 진행</p>
+                                        <p className="text-lg font-bold text-amber-300">
+                                            {hostCurrentBettingTeamIndex + 1}조
+                                            {hostCurrentBettingTeamIndex + 1 === Number(teamNo) ? ' 🎯 (당신)' : ''}
+                                        </p>
+                                        {hostCurrentBettingTeamIndex + 1 !== Number(teamNo) && (
+                                            <p className="text-xs text-slate-400 mt-2">다른 팀이 배팅 중입니다...</p>
+                                        )}
+                                    </div>
+
+                                    {/* 자신의 배팅 타일 */}
+                                    {allTeamsBettingTiles.find(t => t.id === Number(teamNo))?.bettingTiles.length > 0 && (
+                                        <div className="bg-slate-700/50 p-4 rounded-xl border border-slate-600">
+                                            <h3 className="text-sm font-bold text-amber-300 mb-3">🎰 선택한 배팅 타일 ({allTeamsBettingTiles.find(t => t.id === Number(teamNo))?.bettingTiles.length}/2)</h3>
+                                            <div className="grid grid-cols-1 gap-2">
+                                                {allTeamsBettingTiles.find(t => t.id === Number(teamNo))?.bettingTiles.map((tile, idx) => {
+                                                    const mascot = MASCOTS.find(m => m.id === tile.mascotId);
+                                                    return (
+                                                        <div
+                                                            key={idx}
+                                                            className="px-3 py-2 rounded-lg text-sm font-bold flex items-center gap-2 border-2"
+                                                            style={{
+                                                                backgroundColor: mascot?.bgColor,
+                                                                borderColor: mascot?.strokeColor,
+                                                                color: mascot?.strokeColor
+                                                            }}
+                                                        >
+                                                            <span>{mascot?.name}</span>
+                                                            <span>타일#{tile.tileId}</span>
+                                                            <span className={tile.type === 'safe' ? 'text-blue-300' : 'text-red-300'}>
+                                                                {tile.type === 'safe' ? '🛡️' : '⚡'}
+                                                            </span>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* 마스코트 선택 */}
+                                    {hostCurrentBettingTeamIndex + 1 === Number(teamNo) ? (
+                                        <div>
+                                            <h2 className="text-lg font-bold mb-4">🎯 마스코트 선택</h2>
+                                            <div className="grid grid-cols-2 gap-2">
+                                                {MASCOTS.map(m => (
+                                                    <button
+                                                        key={m.id}
+                                                        onClick={() => selectBettingMascot(m.id)}
+                                                        className="p-3 rounded-xl font-bold text-sm border transition"
+                                                        style={{
+                                                            backgroundColor: selectedBettingMascot === m.id ? m.bgColor : '#1e293b',
+                                                            borderColor: selectedBettingMascot === m.id ? m.strokeColor : '#334155',
+                                                            color: selectedBettingMascot === m.id ? m.strokeColor : '#cbd5e1'
+                                                        }}
+                                                    >
+                                                        {m.name}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="text-center py-6 bg-slate-700/30 rounded-lg">
+                                            <p className="text-slate-400">다른 팀이 배팅하고 있습니다</p>
+                                            <p className="text-sm text-slate-500 mt-2">차례를 기다려주세요...</p>
+                                        </div>
+                                    )}
+
+                                    {/* 배팅 타일 선택 */}
+                                    {selectedBettingMascot && (
+                                        <div>
+                                            <h3 className="text-sm font-bold mb-3 text-amber-300">📊 배팅 타일 선택</h3>
+                                            <div className="bg-slate-700/50 p-3 rounded-lg space-y-2">
+                                                {(() => {
+                                                    // 다른 팀이 선택한 타일 ID 수집
+                                                    const selectedTileIds = new Set();
+                                                    allTeamsBettingTiles.forEach(team => {
+                                                        team.bettingTiles.forEach(tile => {
+                                                            if (tile.mascotId === selectedBettingMascot) {
+                                                                selectedTileIds.add(tile.tileId);
+                                                            }
+                                                        });
+                                                    });
+
+                                                    // 다음에 선택할 수 있는 타일 찾기
+                                                    const tiles = BETTING_TILES[selectedBettingMascot];
+                                                    let nextTile = null;
+                                                    for (let i = 0; i < tiles.length; i++) {
+                                                        if (!selectedTileIds.has(tiles[i].id)) {
+                                                            nextTile = tiles[i];
+                                                            break;
+                                                        }
+                                                    }
+
+                                                    return nextTile ? (
+                                                        <>
+                                                            <div className="text-xs text-slate-400 mb-2">타일 #{nextTile.id}</div>
+                                                            <div className="grid grid-cols-2 gap-2">
+                                                                <button
+                                                                    onClick={() => selectBettingTile(selectedBettingMascot, 'safe')}
+                                                                    className="p-2 rounded-lg text-sm font-bold bg-blue-600 hover:bg-blue-500 transition"
+                                                                >
+                                                                    🛡️ 안전<br/>
+                                                                    <span className="text-xs">
+                                                                        1등 {nextTile.safe[1]}pt,
+                                                                        2등 {nextTile.safe[2]}pt,
+                                                                        3등 {nextTile.safe[3]}pt
+                                                                    </span>
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => selectBettingTile(selectedBettingMascot, 'risky')}
+                                                                    className="p-2 rounded-lg text-sm font-bold bg-red-600 hover:bg-red-500 transition"
+                                                                >
+                                                                    ⚡ 위험<br/>
+                                                                    <span className="text-xs">
+                                                                        1등 {nextTile.risky[1]}pt,
+                                                                        2등 {nextTile.risky[2]}pt,
+                                                                        3등 {nextTile.risky[3]}pt
+                                                                    </span>
+                                                                </button>
+                                                            </div>
+                                                        </>
+                                                    ) : (
+                                                        <p className="text-sm text-slate-400">모든 타일이 가져가졌습니다.</p>
+                                                    );
+                                                })()}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* 받은 카드 */}
+                                    {receivedCards.length > 0 && (
+                                        <div className="bg-slate-700/50 p-4 rounded-xl border border-slate-600">
+                                            <h3 className="text-sm font-bold text-amber-300 mb-3">🎁 나눠받은 카드 ({receivedCards.length}장)</h3>
+                                            <div className="grid grid-cols-1 gap-2">
+                                                {receivedCards.map((card, idx) => {
+                                                    const mascot = MASCOTS.find(m => m.id === card.mascotId);
+                                                    const color = card.isUniversal ? '#15803d' : mascot?.strokeColor || '#999';
+                                                    const bgColor = card.isUniversal ? '#86efac' : mascot?.bgColor || '#f3f4f6';
+                                                    return (
+                                                        <div
+                                                            key={idx}
+                                                            className="px-3 py-2 rounded-lg text-sm font-bold flex items-center gap-2 border-2"
+                                                            style={{
+                                                                backgroundColor: bgColor,
+                                                                borderColor: color,
+                                                                color: color
+                                                            }}
+                                                        >
+                                                            <span>{card.emoji}</span>
+                                                            <span>{card.name}</span>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             )}
 
@@ -1336,6 +2294,15 @@
                     </div>
                 );
             }
+
+            // Fallback - 디버그용
+            return (
+                <div className="p-8 text-center">
+                    <p className="text-red-400 font-bold mb-4">🔴 오류: 상태를 읽을 수 없습니다</p>
+                    <p className="text-slate-400 mb-4">role: {role} | gamePhase: {gamePhase}</p>
+                    <p className="text-slate-500 text-sm">F12 콘솔에서 에러를 확인해주세요</p>
+                </div>
+            );
         }
 
         // Client Sub-component for Card Selection
@@ -1352,7 +2319,12 @@
                                 <button
                                     key={m.id}
                                     onClick={() => setSelectedMascot(m.id)}
-                                    className={`p-2 rounded text-sm font-bold border transition ${selectedMascot === m.id ? 'bg-blue-600 border-blue-400' : 'bg-slate-700 border-slate-600'}`}
+                                    className="p-2 rounded text-sm font-bold border transition"
+                                    style={{
+                                        backgroundColor: selectedMascot === m.id ? m.bgColor : '#475569',
+                                        borderColor: selectedMascot === m.id ? m.strokeColor : '#334155',
+                                        color: selectedMascot === m.id ? m.strokeColor : '#cbd5e1'
+                                    }}
                                 >
                                     {m.name}
                                 </button>
