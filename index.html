@@ -1,455 +1,1393 @@
 <!DOCTYPE html>
 <html lang="ko">
+
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hot Streak Workshop Boardgame (YES/NO Edition)</title>
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
-</head>
-<body class="bg-slate-900 text-white min-h-screen">
-  <div id="root"></div>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>보드게임 도우미 (Board Game Helper)</title>
 
-  <script type="text/babel">
-    const { useState, useEffect, useRef } = React;
+    <!-- FontAwesome & Base CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
-    const MASCOTS = [
-      { id: 'hotdog', name: '🌭 핫도그', color: 'bg-red-500' },
-      { id: 'bear', name: '🐻 곰돌이', color: 'bg-amber-600' },
-      { id: 'duck', name: '🦆 오리', color: 'bg-yellow-400' },
-      { id: 'rabbit', name: '🐰 토끼', color: 'bg-pink-400' }
-    ];
+    <!-- Hot Streak React App Dependencies -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 
-    const CARDS = [
-      { id: 'f2', label: '🚀 +2칸 전진' },
-      { id: 'f1', label: '🏃 +1칸 전진' },
-      { id: 'b1', label: '🍌 -1칸 후퇴' },
-      { id: 'stop', label: '🛑 얼음 (정지)' },
-      { id: 'swap_front', label: '🔄 앞 말과 교체 (스왑)' },
-      { id: 'boost_last', label: '🔥 꼴찌 쾌속 (+3칸)' }
-    ];
+    <style>
+        :root {
+            --primary: #4f46e5;
+            --primary-hover: #4338ca;
+            --bg-color: #f1f5f9;
+            --card-bg: #ffffff;
+            --card-back: #312e81;
 
-    function App() {
-      const [role, setRole] = useState(null); // 'host' | 'client'
-      const [peerId, setPeerId] = useState('');
-      const [targetHostId, setTargetHostId] = useState('');
-      const [teamNo, setTeamNo] = useState(1);
+            /* Special Card Theme Colors */
+            --star-color: #f59e0b;
+            --star-bg: #fffbeb;
+            --xx-color: #ef4444;
+            --xx-bg: #fef2f2;
+            --double-color: #8b5cf6;
+            --double-bg: #f5f3ff;
+            --double-effect-color: #06b6d4;
+            --double-effect-bg: #ecfeff;
 
-      // State for Host
-      const [teamsData, setTeamsData] = useState(
-        Array.from({ length: 8 }, (_, i) => ({
-          id: i + 1,
-          connected: false,
-          bet: null, // { mascotId, type: 'WINNER' | 'YES_TOP2' | 'NO_TOP2' }
-          card: null,
-          score: 100
-        }))
-      );
-      const [gamePhase, setGamePhase] = useState('BETTING'); // BETTING, CARD, RACE, RESULT
-      const [mascotPositions, setMascotPositions] = useState({ hotdog: 0, bear: 0, duck: 0, rabbit: 0 });
-      const [round, setRound] = useState(1);
-
-      // PeerJS refs
-      const peerRef = useRef(null);
-      const connRef = useRef(null);
-      const connectionsRef = useRef({});
-
-      // Host Peer Init
-      const initHost = () => {
-        const id = 'hotstreak-workshop-' + Math.floor(1000 + Math.random() * 9000);
-        const peer = new Peer(id);
-        peerRef.current = peer;
-
-        peer.on('open', (id) => {
-          setPeerId(id);
-          setRole('host');
-        });
-
-        peer.on('connection', (conn) => {
-          connectionsRef.current[conn.peer] = conn;
-          conn.on('data', (data) => handleClientData(data, conn.peer));
-        });
-      };
-
-      // Client Peer Init
-      const initClient = () => {
-        if (!targetHostId) return alert('호스트 코드를 입력하세요!');
-        const peer = new Peer();
-        peerRef.current = peer;
-
-        peer.on('open', () => {
-          const conn = peer.connect(targetHostId);
-          connRef.current = conn;
-          
-          conn.on('open', () => {
-            setRole('client');
-            conn.send({ type: 'JOIN', teamNo: Number(teamNo) });
-          });
-
-          conn.on('data', (data) => {
-            if (data.type === 'PHASE_CHANGE') setGamePhase(data.phase);
-          });
-        });
-      };
-
-      // Host Data Handler
-      const handleClientData = (data, peerId) => {
-        if (data.type === 'JOIN') {
-          setTeamsData(prev => prev.map(t => t.id === data.teamNo ? { ...t, connected: true } : t));
-        } else if (data.type === 'SUBMIT_BET') {
-          setTeamsData(prev => prev.map(t => t.id === data.teamNo ? { ...t, bet: data.bet } : t));
-        } else if (data.type === 'SUBMIT_CARD') {
-          setTeamsData(prev => prev.map(t => t.id === data.teamNo ? { ...t, card: data.card } : t));
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            --shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
         }
-      };
 
-      const broadcastPhase = (phase) => {
-        setGamePhase(phase);
-        Object.values(connectionsRef.current).forEach(conn => {
-          if (conn.open) conn.send({ type: 'PHASE_CHANGE', phase });
-        });
-      };
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
 
-      // 레이스 계산 및 YES/NO 정산 로직
-      const runRace = () => {
-        broadcastPhase('RACE');
-        let newPos = { ...mascotPositions };
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
 
-        // 무브먼트/특수 카드 처리
-        teamsData.forEach(t => {
-          if (t.card) {
-            const mId = t.card.mascotId;
-            const cType = t.card.cardId;
-            const currentPos = newPos[mId];
+        /* Main Navigation Bar */
+        .game-nav {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-bottom: 25px;
+            width: 100%;
+            max-width: 1480px;
+            flex-wrap: wrap;
+        }
 
-            if (cType === 'f2') {
-              newPos[mId] = Math.min(10, currentPos + 2);
-            } else if (cType === 'f1') {
-              newPos[mId] = Math.min(10, currentPos + 1);
-            } else if (cType === 'b1') {
-              newPos[mId] = Math.max(0, currentPos - 1);
-            } else if (cType === 'swap_front') {
-              let targetId = null;
-              let targetPos = 11; 
-              for (let [id, pos] of Object.entries(newPos)) {
-                if (pos > currentPos && pos < targetPos) {
-                  targetId = id;
-                  targetPos = pos;
-                }
-              }
-              if (targetId) {
-                newPos[mId] = targetPos;
-                newPos[targetId] = currentPos;
-              }
-            } else if (cType === 'boost_last') {
-              const minPos = Math.min(...Object.values(newPos));
-              if (currentPos === minPos) {
-                newPos[mId] = Math.min(10, currentPos + 3);
-              }
+        .nav-btn {
+            flex: 1;
+            min-width: 160px;
+            background: white;
+            border: 2px solid #e2e8f0;
+            border-radius: 16px;
+            padding: 16px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: #475569;
+            cursor: pointer;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+        }
+
+        .nav-btn i {
+            font-size: 1.4rem;
+            transition: transform 0.2s ease;
+        }
+
+        .nav-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: var(--shadow);
+            color: var(--primary);
+            border-color: #c7d2fe;
+        }
+
+        .nav-btn:hover i {
+            transform: scale(1.15);
+        }
+
+        .nav-btn.active {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+            box-shadow: 0 8px 20px rgba(79, 70, 229, 0.3);
+        }
+
+        .nav-btn.active i {
+            color: white;
+        }
+
+        /* Game Pages Container */
+        .game-page {
+            display: none;
+            width: 100%;
+            max-width: 1480px;
+            animation: fadeIn 0.3s ease-in-out;
+        }
+
+        .game-page.active {
+            display: block;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        header h1 {
+            font-size: 2.2rem;
+            color: var(--primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        header p {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+            margin-top: 6px;
+        }
+
+        .container {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .section-card {
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: var(--shadow);
+            border: 1px solid #e2e8f0;
+        }
+
+        .section-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            margin-bottom: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: #334155;
+        }
+
+        /* Streams Specific Styles */
+        .pool-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            height: 55px;
+            overflow-y: auto;
+            padding: 5px;
+            background: #f8fafc;
+            border-radius: 10px;
+            align-content: flex-start;
+            border: 1px inset #e2e8f0;
+        }
+
+        .card-mini {
+            width: 28px;
+            height: 40px;
+            background: var(--card-back);
+            border-radius: 5px;
+            border: 2px solid #818cf8;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            position: relative;
+            flex-shrink: 0;
+        }
+
+        .card-mini::after {
+            content: '🎲';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 0.65rem;
+            opacity: 0.7;
+        }
+
+        .main-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 1480px) {
+            .main-grid {
+                grid-template-columns: 1fr;
             }
-          }
-        });
+        }
 
-        // 결과 계산 및 YES/NO 정산
-        setTimeout(() => {
-          setMascotPositions(newPos);
-          
-          const sorted = Object.entries(newPos).sort((a, b) => b[1] - a[1]);
-          const winnerId = sorted[0][0];
-          const top2Ids = [sorted[0][0], sorted[1][0]];
+        .draw-area {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 25px 20px;
+            gap: 20px;
+            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+        }
 
-          setTeamsData(prev => prev.map(t => {
-            if (!t.bet) return t;
+        .card-display {
+            width: 200px;
+            height: 260px;
+            background: white;
+            border-radius: 20px;
+            border: 4px solid var(--primary);
+            box-shadow: 0 20px 30px rgba(79, 70, 229, 0.15);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            padding: 15px;
+            text-align: center;
+        }
 
-            let addScore = 0;
-            const { mascotId, type } = t.bet;
+        .card-display.theme-star {
+            border-color: var(--star-color);
+            background: var(--star-bg);
+            box-shadow: 0 20px 30px rgba(245, 158, 11, 0.25);
+        }
 
-            // 🏆 1등 베팅 정산 (+50pt)
-            if (type === 'WINNER' && mascotId === winnerId) {
-              addScore = 50;
-            } 
-            // 👍 Top2 YES 베팅 정산 (+25pt)
-            else if (type === 'YES_TOP2' && top2Ids.includes(mascotId)) {
-              addScore = 25;
-            } 
-            // 👎 Top2 NO 베팅 정산 (+25pt)
-            else if (type === 'NO_TOP2' && !top2Ids.includes(mascotId)) {
-              addScore = 25;
+        .card-display.theme-xx {
+            border-color: var(--xx-color);
+            background: var(--xx-bg);
+            box-shadow: 0 20px 30px rgba(239, 68, 68, 0.25);
+        }
+
+        .card-display.theme-double {
+            border-color: var(--double-color);
+            background: var(--double-bg);
+            box-shadow: 0 20px 30px rgba(139, 92, 246, 0.25);
+        }
+
+        .card-display.theme-double-effect {
+            border-color: var(--double-effect-color);
+            background: var(--double-effect-bg);
+            box-shadow: 0 20px 30px rgba(6, 182, 212, 0.25);
+        }
+
+        .card-value {
+            font-size: 4.5rem;
+            font-weight: 900;
+            color: var(--primary);
+            line-height: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .card-value.star {
+            color: var(--star-color);
+        }
+
+        .card-value.xx {
+            color: var(--xx-color);
+            font-size: 4.2rem;
+        }
+
+        .card-value.double {
+            color: var(--double-color);
+            font-size: 3.5rem;
+        }
+
+        .card-value.double-effect {
+            color: var(--double-effect-color);
+        }
+
+        .card-subtext {
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: var(--text-muted);
+            margin-top: 12px;
+            text-align: center;
+            line-height: 1.3;
+        }
+
+        .controls {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .btn {
+            padding: 14px 28px;
+            font-size: 1.05rem;
+            font-weight: 700;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+            box-shadow: 0 4px 14px rgba(79, 70, 229, 0.35);
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-hover);
+            transform: translateY(-2px);
+        }
+
+        .btn-primary.pending-xx {
+            background: var(--xx-color);
+            box-shadow: 0 4px 14px rgba(239, 68, 68, 0.4);
+            animation: pulse 1.5s infinite;
+        }
+
+        .btn-primary.pending-double {
+            background: var(--double-color);
+            box-shadow: 0 4px 14px rgba(139, 92, 246, 0.4);
+            animation: pulse 1.5s infinite;
+        }
+
+        .btn-primary:disabled {
+            background: #cbd5e1;
+            cursor: not-allowed;
+            box-shadow: none;
+            transform: none;
+            animation: none;
+        }
+
+        .btn-secondary {
+            background: #e2e8f0;
+            color: #475569;
+        }
+
+        .btn-secondary:hover {
+            background: #cbd5e1;
+        }
+
+        .trash-section {
+            background: #fef2f2;
+            border: 2px dashed #fca5a5;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .trash-title {
+            color: var(--xx-color);
+            font-weight: 700;
+            font-size: 1.05rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .trash-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .trash-item {
+            background: white;
+            border: 1px solid #fecaca;
+            border-left: 4px solid var(--xx-color);
+            padding: 10px 12px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .trash-val {
+            font-size: 1.2rem;
+            font-weight: 800;
+            color: var(--xx-color);
+            text-decoration: line-through;
+        }
+
+        .trash-tag {
+            font-size: 0.75rem;
+            background: #fee2e2;
+            color: #991b1b;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-weight: 600;
+        }
+
+        .history-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+            gap: 12px;
+            margin-top: 10px;
+        }
+
+        .history-item {
+            background: white;
+            border: 2px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 12px 6px 8px 6px;
+            text-align: center;
+            position: relative;
+            animation: fadeIn 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 85px;
+        }
+
+        .history-item.is-star {
+            border-color: var(--star-color);
+            background: var(--star-bg);
+        }
+
+        .history-item.is-xx {
+            border-color: var(--xx-color);
+            background: var(--xx-bg);
+        }
+
+        .history-item.is-double {
+            border-color: var(--double-color);
+            background: var(--double-bg);
+        }
+
+        .history-item.is-double-effect {
+            border-color: var(--double-effect-color);
+            background: var(--double-effect-bg);
+            box-shadow: 0 0 10px rgba(6, 182, 212, 0.2);
+        }
+
+        .history-order {
+            position: absolute;
+            top: -8px;
+            left: -8px;
+            background: #334155;
+            color: white;
+            font-size: 0.7rem;
+            font-weight: bold;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .history-val {
+            font-size: 1.5rem;
+            font-weight: 800;
+            color: #1e293b;
+        }
+
+        .history-val.star {
+            color: var(--star-color);
+        }
+
+        .history-val.xx {
+            color: var(--xx-color);
+        }
+
+        .history-val.double {
+            color: var(--double-color);
+        }
+
+        .history-val.double-effect {
+            color: var(--double-effect-color);
+        }
+
+        .effect-badge {
+            font-size: 0.65rem;
+            font-weight: 800;
+            padding: 2px 5px;
+            border-radius: 4px;
+            margin-top: 4px;
+            text-transform: uppercase;
+        }
+
+        .badge-double {
+            color: #0891b2;
+        }
+
+        .badge-star {
+            color: var(--star-color);
+        }
+
+        .status-badge {
+            padding: 4px 10px;
+            border-radius: 20px;
+            background: #e0e7ff;
+            color: var(--primary);
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .options-panel {
+            display: flex;
+            gap: 15px;
+            margin-top: 8px;
+            font-size: 0.9rem;
+            flex-wrap: wrap;
+        }
+
+        .options-panel label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+        }
+
+        .timer-display {
+            font-size: 4rem;
+            font-weight: 900;
+            color: #0f172a;
+            font-family: monospace;
+            margin: 15px 0;
+            height: 80px;
+            line-height: 80px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(8px);
             }
 
-            return { ...t, score: t.score + addScore };
-          }));
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
 
-          setTimeout(() => broadcastPhase('RESULT'), 2000);
-        }, 1000);
-      };
+        @keyframes pulse {
+            0% {
+                transform: scale(1);
+            }
 
-      const nextRound = () => {
-        setMascotPositions({ hotdog: 0, bear: 0, duck: 0, rabbit: 0 });
-        setTeamsData(prev => prev.map(t => ({ ...t, bet: null, card: null })));
-        setRound(r => r + 1);
-        broadcastPhase('BETTING');
-      };
+            50% {
+                transform: scale(1.03);
+            }
 
-      // Selection Screen
-      if (!role) {
-        return (
-          <div className="flex flex-col items-center justify-center min-h-screen p-4">
-            <h1 className="text-4xl font-extrabold mb-8 text-amber-400">🔥 Hot Streak Workshop</h1>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-md">
-              <button onClick={initHost} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-6 rounded-xl shadow-lg transition">
-                📺 메인 스크린 생성 (Host)
-              </button>
-              <div className="bg-slate-800 p-6 rounded-xl flex flex-col gap-3">
-                <h2 className="text-xl font-bold">📱 조별 접속 (Client)</h2>
-                <input 
-                  type="text" 
-                  placeholder="호스트 코드 입력 (예: hotstreak-workshop-1234)" 
-                  value={targetHostId}
-                  onChange={e => setTargetHostId(e.target.value)}
-                  className="p-2 rounded bg-slate-700 border border-slate-600 text-white"
-                />
-                <select 
-                  value={teamNo} 
-                  onChange={e => setTeamNo(e.target.value)}
-                  className="p-2 rounded bg-slate-700 border border-slate-600 text-white"
-                >
-                  {Array.from({ length: 8 }, (_, i) => (
-                    <option key={i + 1} value={i + 1}>{i + 1}조</option>
-                  ))}
-                </select>
-                <button onClick={initClient} className="bg-emerald-600 hover:bg-emerald-500 font-bold py-3 rounded-lg transition">
-                  접속하기
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      }
+            100% {
+                transform: scale(1);
+            }
+        }
+    </style>
+</head>
 
-      // HOST DISPLAY
-      if (role === 'host') {
-        const renderBetLabel = (bet) => {
-          if (!bet) return '⏳ 대기 중';
-          const mascotName = MASCOTS.find(m => m.id === bet.mascotId)?.name;
-          if (bet.type === 'WINNER') return `🏆 1등: ${mascotName}`;
-          if (bet.type === 'YES_TOP2') return `👍 Top2 YES: ${mascotName}`;
-          if (bet.type === 'NO_TOP2') return `👎 Top2 NO: ${mascotName}`;
-          return '완료';
-        };
+<body>
 
-        return (
-          <div className="p-6 max-w-7xl mx-auto flex flex-col gap-6">
-            <div className="bg-slate-800 p-4 rounded-xl flex flex-wrap justify-between items-center gap-4">
-              <div>
-                <h1 className="text-2xl font-bold text-amber-400">🔥 Hot Streak [Round {round}]</h1>
-                <p className="text-sm text-slate-400">접속 코드: <span className="text-white font-mono font-bold text-lg bg-slate-700 px-2 py-1 rounded">{peerId}</span></p>
-              </div>
-              <div className="flex gap-2">
-                {gamePhase === 'BETTING' && <button onClick={() => broadcastPhase('CARD')} className="bg-blue-600 px-4 py-2 rounded-lg font-bold">카드 제출 단계로</button>}
-                {gamePhase === 'CARD' && <button onClick={runRace} className="bg-rose-600 px-4 py-2 rounded-lg font-bold">🏎️ 레이스 시작!</button>}
-                {gamePhase === 'RESULT' && <button onClick={nextRound} className="bg-emerald-600 px-4 py-2 rounded-lg font-bold">다음 라운드 ➡️</button>}
-              </div>
-            </div>
+    <!-- Game Navigation -->
+    <nav class="game-nav">
+        <button class="nav-btn active" onclick="switchGame('streams')">
+            🎲 Streams
+        </button>
+        <button class="nav-btn" onclick="switchGame('hotstreak')">
+            🔥 Hot Streak
+        </button>
+        <button class="nav-btn" onclick="switchGame('telestrations')">
+            ✏️ Telestrations
+        </button>
+    </nav>
 
-            <div className="bg-slate-800 p-6 rounded-xl border border-slate-700">
-              <h2 className="text-xl font-bold mb-4">🏟️ 경기장</h2>
-              <div className="flex flex-col gap-4">
-                {MASCOTS.map(m => (
-                  <div key={m.id} className="flex items-center gap-4">
-                    <span className="w-24 font-bold">{m.name}</span>
-                    <div className="flex-1 bg-slate-700 h-10 rounded-lg relative overflow-hidden flex items-center px-2">
-                      <div className="absolute inset-0 grid grid-cols-11 pointer-events-none opacity-20">
-                        {Array.from({ length: 11 }).map((_, i) => (
-                          <div key={i} className="border-r border-white"></div>
-                        ))}
-                      </div>
-                      <div 
-                        className={`h-8 w-8 rounded-full ${m.color} flex items-center justify-center font-bold text-xs transition-all duration-[1500ms] shadow-md z-10`}
-                        style={{ left: `${(mascotPositions[m.id] / 10) * 90}%`, position: 'relative' }}
-                      >
-                        {mascotPositions[m.id]}
-                      </div>
+    <!-- ==================== STREAMS PAGE ==================== -->
+    <div id="streams" class="game-page active">
+        <header>
+            <p>숫자 카드를 '오름차순'으로 배치하며 최고 점수를 달성해보세요!</p>
+        </header>
+
+        <div class="container">
+            <!-- Fixed Top: Card Pool Area -->
+            <div class="section-card">
+                <div class="section-title">
+                    <span><i class="fa-solid fa-layer-group"></i> 남은 카드 pool (뒷면)</span>
+                    <div class="options-panel">
+                        <strong style="color:#475569;">특수 카드 포함:</strong>
+                        <label><input type="checkbox" id="optStar" checked onchange="resetGame()"> 별(조커)</label>
+                        <label><input type="checkbox" id="optXX" checked onchange="resetGame()"> XX (휴지통)</label>
+                        <label><input type="checkbox" id="optDouble" checked onchange="resetGame()"> 선택 (택1)</label>
                     </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {teamsData.map(t => (
-                <div key={t.id} className={`p-4 rounded-xl border ${t.connected ? 'bg-slate-800 border-slate-600' : 'bg-slate-800/40 border-slate-700/50 opacity-50'}`}>
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="font-bold text-lg">{t.id}조</span>
-                    <span className="text-amber-400 font-bold">{t.score} pt</span>
-                  </div>
-                  <div className="text-xs space-y-1 text-slate-300">
-                    <div>베팅: {renderBetLabel(t.bet)}</div>
-                    <div>카드: {t.card ? '✅ 제출 완료' : '⏳ 대기 중'}</div>
-                  </div>
+                    <span class="status-badge" id="remainingCountText">남은 카드: 42장</span>
                 </div>
-              ))}
+                <div class="pool-grid" id="cardPoolGrid"></div>
             </div>
-          </div>
-        );
-      }
 
-      // CLIENT DISPLAY
-      if (role === 'client') {
-        const myTeam = teamsData.find(t => t.id === Number(teamNo));
+            <!-- Middle Grid: Main Draw & Trash Bin -->
+            <div class="main-grid">
+                <!-- Draw Area -->
+                <div class="section-card draw-area">
+                    <div class="card-display" id="mainCardDisplay">
+                        <div class="card-value" id="drawnValue">?</div>
+                        <div class="card-subtext" id="drawnSubtext">버튼을 눌러 카드를 뽑으세요</div>
+                    </div>
 
-        const sendBet = (betObj) => {
-          if (connRef.current) connRef.current.send({ type: 'SUBMIT_BET', teamNo: Number(teamNo), bet: betObj });
-          setTeamsData(prev => prev.map(t => t.id === Number(teamNo) ? { ...t, bet: betObj } : t));
-        };
-
-        const sendCard = (mascotId, cardId) => {
-          if (connRef.current) connRef.current.send({ type: 'SUBMIT_CARD', teamNo: Number(teamNo), card: { mascotId, cardId } });
-          setTeamsData(prev => prev.map(t => t.id === Number(teamNo) ? { ...t, card: { mascotId, cardId } } : t));
-        };
-
-        return (
-          <div className="p-4 max-w-md mx-auto min-h-screen flex flex-col justify-between">
-            <div>
-              <div className="bg-slate-800 p-4 rounded-xl flex justify-between items-center mb-6 border border-slate-600">
-                <span className="text-xl font-bold text-amber-400">{teamNo}조 화면</span>
-                <span className="text-sm bg-slate-700 px-3 py-1 rounded-full font-bold">Phase: {gamePhase}</span>
-              </div>
-
-              {gamePhase === 'BETTING' && (
-                <BetSelection MASCOTS={MASCOTS} onSubmit={sendBet} currentBet={myTeam?.bet} />
-              )}
-
-              {gamePhase === 'CARD' && (
-                <CardSelection MASCOTS={MASCOTS} CARDS={CARDS} onSubmit={sendCard} currentCard={myTeam?.card} />
-              )}
-
-              {(gamePhase === 'RACE' || gamePhase === 'RESULT') && (
-                <div className="text-center py-12">
-                  <div className="text-5xl mb-4 animate-bounce">🏎️</div>
-                  <h2 className="text-xl font-bold mb-2">레이스가 진행 중입니다!</h2>
-                  <p className="text-slate-400 text-sm">대형 스크린을 확인해 주세요.</p>
+                    <div class="controls">
+                        <button class="btn btn-primary" id="drawBtn" onclick="handleDrawClick()">
+                            <i class="fa-solid fa-hand-pointer"></i> 카드 뽑기
+                        </button>
+                        <button class="btn btn-secondary" onclick="resetGame()">
+                            <i class="fa-solid fa-rotate-right"></i> 새 게임
+                        </button>
+                    </div>
                 </div>
-              )}
+
+                <!-- Trash Bin Area -->
+                <div class="section-card trash-section">
+                    <div class="trash-title">
+                        <i class="fa-solid fa-trash-can"></i> 쓰레기통 (버려진 카드)
+                    </div>
+                    <div class="trash-list" id="trashList">
+                        <p style="text-align: center; color: #fca5a5; padding: 30px 0; font-size: 0.9rem;">
+                            XX 카드가 나오면 버려질 카드 2장이 이곳에 보관됩니다.
+                        </p>
+                    </div>
+                </div>
             </div>
-            <div className="text-center text-xs text-slate-500 py-4">Hot Streak Workshop Assistant</div>
-          </div>
-        );
-      }
-    }
 
-    // Client Sub-component for Bet Selection (YES/NO included)
-    function BetSelection({ MASCOTS, onSubmit, currentBet }) {
-      const [selectedMascot, setSelectedMascot] = useState(currentBet?.mascotId || MASCOTS[0].id);
-      const [betType, setBetType] = useState(currentBet?.type || 'WINNER');
-
-      return (
-        <div className="bg-slate-800 p-4 rounded-xl flex flex-col gap-5 border border-slate-700">
-          <div>
-            <label className="text-sm font-bold text-slate-300 block mb-3">1. 베팅할 마스코트 선택</label>
-            <div className="grid grid-cols-2 gap-2">
-              {MASCOTS.map(m => (
-                <button 
-                  key={m.id}
-                  onClick={() => setSelectedMascot(m.id)}
-                  className={`p-3 rounded-lg text-sm font-bold border transition ${selectedMascot === m.id ? 'bg-blue-600 border-blue-400 text-white' : 'bg-slate-700 border-slate-600 text-slate-300'}`}
-                >
-                  {m.name}
-                </button>
-              ))}
+            <!-- Bottom: History -->
+            <div class="section-card">
+                <div class="section-title">
+                    <span><i class="fa-solid fa-clock-rotate-left"></i> 뽑힌 카드 목록 (순서대로)</span>
+                    <span class="status-badge" id="drawnCountText">진행: 0 턴</span>
+                </div>
+                <div class="history-list" id="historyList">
+                    <p style="grid-column: 1/-1; text-align: center; color: #94a3b8; padding: 20px 0;">
+                        아직 뽑힌 카드가 없습니다.
+                    </p>
+                </div>
             </div>
-          </div>
-
-          <div>
-            <label className="text-sm font-bold text-slate-300 block mb-3">2. 베팅 방식 선택</label>
-            <div className="flex flex-col gap-2">
-              <button 
-                onClick={() => setBetType('WINNER')}
-                className={`p-3 rounded-lg text-sm font-bold text-left border transition flex justify-between items-center ${betType === 'WINNER' ? 'bg-amber-600 border-amber-400 text-white' : 'bg-slate-700 border-slate-600 text-slate-300'}`}
-              >
-                <span>🏆 단독 1등 예상</span>
-                <span className="text-xs bg-black/30 px-2 py-1 rounded">+50pt</span>
-              </button>
-
-              <button 
-                onClick={() => setBetType('YES_TOP2')}
-                className={`p-3 rounded-lg text-sm font-bold text-left border transition flex justify-between items-center ${betType === 'YES_TOP2' ? 'bg-emerald-600 border-emerald-400 text-white' : 'bg-slate-700 border-slate-600 text-slate-300'}`}
-              >
-                <span>👍 Top 2 안에 들어간다 (YES)</span>
-                <span className="text-xs bg-black/30 px-2 py-1 rounded">+25pt</span>
-              </button>
-
-              <button 
-                onClick={() => setBetType('NO_TOP2')}
-                className={`p-3 rounded-lg text-sm font-bold text-left border transition flex justify-between items-center ${betType === 'NO_TOP2' ? 'bg-rose-600 border-rose-400 text-white' : 'bg-slate-700 border-slate-600 text-slate-300'}`}
-              >
-                <span>👎 Top 2 안에 못 들어간다 (NO)</span>
-                <span className="text-xs bg-black/30 px-2 py-1 rounded">+25pt</span>
-              </button>
-            </div>
-          </div>
-
-          <button 
-            onClick={() => onSubmit({ mascotId: selectedMascot, type: betType })}
-            className="w-full bg-amber-500 hover:bg-amber-400 text-slate-900 font-extrabold py-4 rounded-xl transition mt-2 shadow-lg"
-          >
-            {currentBet ? '베팅 변경하기' : '베팅 최종 제출'}
-          </button>
         </div>
-      );
-    }
+    </div>
 
-    function CardSelection({ MASCOTS, CARDS, onSubmit, currentCard }) {
-      const [selectedMascot, setSelectedMascot] = useState(currentCard?.mascotId || MASCOTS[0].id);
-      const [selectedCard, setSelectedCard] = useState(currentCard?.cardId || CARDS[0].id);
+    <!-- ==================== HOT STREAK PAGE ==================== -->
+    <div id="hotstreak" class="game-page">
+        <header>
+            <p>달리고 넘어지고 치열한 레이싱에 배팅해보세요!</p>
+        </header>
 
-      return (
-        <div className="bg-slate-800 p-4 rounded-xl flex flex-col gap-5 border border-slate-700">
-          <div>
-            <label className="text-sm font-bold text-slate-300 block mb-3">1. 어떤 마스코트에게 쓸까요?</label>
-            <div className="grid grid-cols-2 gap-2">
-              {MASCOTS.map(m => (
-                <button 
-                  key={m.id}
-                  onClick={() => setSelectedMascot(m.id)}
-                  className={`p-3 rounded-lg text-sm font-bold border transition ${selectedMascot === m.id ? 'bg-blue-600 border-blue-400 text-white' : 'bg-slate-700 border-slate-600 text-slate-300'}`}
-                >
-                  {m.name}
-                </button>
-              ))}
+        <!-- Hot Streak Boardgame React App Root Container -->
+        <div id="react-hotstreak-root" class="bg-slate-900 text-white rounded-2xl overflow-hidden min-h-[800px]"></div>
+    </div>
+
+    <!-- ==================== TELESTRATIONS PAGE ==================== -->
+    <div id="telestrations" class="game-page">
+        <header>
+            <p>그림으로 전달되는 엉뚱발랄 스피드게임을 즐겨보세요!</p>
+        </header>
+
+        <div class="container">
+            <div class="section-card" style="text-align: center;">
+                <div class="section-title" style="justify-content: center;">
+                    <span><i class="fa-solid fa-hourglass-half"></i> 60초 스케치 타이머</span>
+                </div>
+                <div class="timer-display" id="teleTimer" style="color: #8b5cf6;">01:00</div>
+                <div class="controls" style="justify-content: center;">
+                    <button class="btn btn-primary" style="background: var(--double-color);"
+                        onclick="startTeleTimer()"><i class="fa-solid fa-play"></i> 그리기 시작!</button>
+                    <button class="btn btn-secondary" onclick="resetTeleTimer()"><i
+                            class="fa-solid fa-rotate-right"></i> 타이머
+                        리셋</button>
+                </div>
             </div>
-          </div>
-
-          <div>
-            <label className="text-sm font-bold text-slate-300 block mb-3">2. 적용할 카드를 고르세요</label>
-            <div className="grid grid-cols-2 gap-2">
-              {CARDS.map(c => (
-                <button 
-                  key={c.id}
-                  onClick={() => setSelectedCard(c.id)}
-                  className={`p-3 rounded-lg text-sm font-bold border transition ${selectedCard === c.id ? 'bg-emerald-600 border-emerald-400 text-white' : 'bg-slate-700 border-slate-600 text-slate-300'}`}
-                >
-                  {c.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <button 
-            onClick={() => onSubmit(selectedMascot, selectedCard)}
-            className="w-full bg-amber-500 hover:bg-amber-400 text-slate-900 font-extrabold py-4 rounded-xl transition mt-2 shadow-lg"
-          >
-            {currentCard ? '카드 변경 (다시 제출)' : '최종 제출하기'}
-          </button>
         </div>
-      );
-    }
+    </div>
 
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App />);
-  </script>
+    <!-- Navigation Switcher Script -->
+    <script>
+        function switchGame(gameId) {
+            document.querySelectorAll('.game-page').forEach(page => page.classList.remove('active'));
+            document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
+
+            document.getElementById(gameId).classList.add('active');
+            event.currentTarget.classList.add('active');
+        }
+    </script>
+
+    <!-- ==================== STREAMS & TELESTRATIONS LOGIC ==================== -->
+    <script>
+        /* STREAMS LOGIC */
+        let deck = [];
+        let drawnCards = [];
+        let trashBin = [];
+        let pendingAction = null;
+
+        function createDeck() {
+            const cards = [];
+            for (let i = 1; i <= 10; i++) cards.push({ type: 'number', value: i });
+            for (let i = 11; i <= 19; i++) {
+                cards.push({ type: 'number', value: i });
+                cards.push({ type: 'number', value: i });
+            }
+            for (let i = 20; i <= 30; i++) cards.push({ type: 'number', value: i });
+
+            if (document.getElementById('optStar').checked) cards.push({ type: 'star', value: '★', label: '별 카드 (조커)! 점수 계산 시 원하는 숫자로 사용 가능합니다.' });
+            if (document.getElementById('optXX').checked) cards.push({ type: 'xx', value: '<i class="fa-solid fa-trash-can"></i>', label: 'XX (쓰레기통 발동!)' });
+            if (document.getElementById('optDouble').checked) cards.push({ type: 'double', value: '2X', label: '선택 카드 (2장 중 택1)' });
+
+            return cards;
+        }
+
+        function shuffle(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+        }
+
+        function resetGame() {
+            deck = createDeck();
+            shuffle(deck);
+            drawnCards = [];
+            trashBin = [];
+            pendingAction = null;
+
+            const mainCard = document.getElementById('mainCardDisplay');
+            const drawnValEl = document.getElementById('drawnValue');
+            const drawnSubtextEl = document.getElementById('drawnSubtext');
+
+            mainCard.className = 'card-display';
+            drawnValEl.className = 'card-value';
+            drawnValEl.innerHTML = '?';
+            drawnSubtextEl.textContent = '버튼을 눌러 카드를 뽑으세요';
+
+            updateButtonState();
+            renderPool();
+            renderHistory();
+            renderTrashBin();
+            updateStatusText();
+        }
+
+        function handleDrawClick() {
+            if (deck.length === 0) return;
+            if (pendingAction) {
+                if (pendingAction.type === 'xx') processPendingXX();
+                else if (pendingAction.type === 'double') processPendingDouble();
+            } else {
+                drawNormalCard();
+            }
+        }
+
+        function drawNormalCard() {
+            const card = deck.pop();
+            drawnCards.push(card);
+            updateMainCardDisplay(card);
+
+            if (card.type === 'xx') {
+                pendingAction = { type: 'xx', count: 2 };
+                document.getElementById('drawnSubtext').textContent = 'XX 발동! 버튼을 눌러 버릴 카드 2장을 차례로 선택하세요.';
+            } else if (card.type === 'double') {
+                pendingAction = { type: 'double', count: 2 };
+                document.getElementById('drawnSubtext').textContent = '선택 발동! 버튼을 눌러 카드 2장을 뽑은 후 각자 원하는 숫자 1개를 선택하세요.';
+            }
+
+            updateButtonState();
+            renderPool();
+            renderHistory();
+            renderTrashBin();
+            updateStatusText();
+        }
+
+        function processPendingXX() {
+            if (deck.length === 0) return;
+            const discardedCard = deck.pop();
+            trashBin.push(discardedCard);
+
+            const stepNum = 3 - pendingAction.count;
+            pendingAction.count--;
+
+            const mainCard = document.getElementById('mainCardDisplay');
+            const drawnValEl = document.getElementById('drawnValue');
+            const drawnSubtextEl = document.getElementById('drawnSubtext');
+
+            mainCard.className = 'card-display theme-xx';
+            drawnValEl.className = 'card-value xx';
+            drawnValEl.innerHTML = `<i class="fa-solid fa-trash-can"></i> ${discardedCard.value}`;
+            drawnSubtextEl.textContent = `[XX 효과] ${discardedCard.value} 카드가 쓰레기통으로 버려졌습니다! (${stepNum}/2)`;
+
+            if (pendingAction.count === 0) pendingAction = null;
+
+            updateButtonState();
+            renderPool();
+            renderHistory();
+            renderTrashBin();
+            updateStatusText();
+        }
+
+        function processPendingDouble() {
+            if (deck.length === 0) return;
+            const extraCard = deck.pop();
+            extraCard.isDoubleEffect = true;
+            drawnCards.push(extraCard);
+
+            const stepNum = 3 - pendingAction.count;
+            pendingAction.count--;
+
+            updateMainCardDisplay(extraCard);
+            document.getElementById('drawnSubtext').textContent = `[선택 효과] 선택 카드 추첨 (${stepNum}/2)`;
+
+            if (pendingAction.count === 0) pendingAction = null;
+
+            updateButtonState();
+            renderPool();
+            renderHistory();
+            renderTrashBin();
+            updateStatusText();
+        }
+
+        function updateMainCardDisplay(card) {
+            const mainCard = document.getElementById('mainCardDisplay');
+            const drawnValEl = document.getElementById('drawnValue');
+            const drawnSubtextEl = document.getElementById('drawnSubtext');
+
+            drawnValEl.innerHTML = card.value;
+            drawnSubtextEl.textContent = card.label;
+
+            mainCard.className = 'card-display';
+            drawnValEl.className = 'card-value';
+
+            if (card.type === 'star') {
+                mainCard.classList.add('theme-star');
+                drawnValEl.classList.add('star');
+            } else if (card.type === 'xx') {
+                mainCard.classList.add('theme-xx');
+                drawnValEl.classList.add('xx');
+            } else if (card.type === 'double') {
+                mainCard.classList.add('theme-double');
+                drawnValEl.classList.add('double');
+            } else if (card.isDoubleEffect) {
+                mainCard.classList.add('theme-double-effect');
+                drawnValEl.classList.add('double-effect');
+            }
+        }
+
+        function updateButtonState() {
+            const drawBtn = document.getElementById('drawBtn');
+            if (deck.length === 0 && !pendingAction) {
+                drawBtn.disabled = true;
+                drawBtn.className = 'btn btn-primary';
+                drawBtn.innerHTML = `<i class="fa-solid fa-flag-checkered"></i> 게임 종료`;
+                return;
+            }
+
+            drawBtn.disabled = false;
+            if (!pendingAction) {
+                drawBtn.className = 'btn btn-primary';
+                drawBtn.innerHTML = `<i class="fa-solid fa-hand-pointer"></i> 카드 뽑기`;
+            } else if (pendingAction.type === 'xx') {
+                const stepNum = 3 - pendingAction.count;
+                drawBtn.className = 'btn btn-primary pending-xx';
+                drawBtn.innerHTML = `<i class="fa-solid fa-trash-can"></i> 쓰레기통으로 버리기 (${stepNum}/2)`;
+            } else if (pendingAction.type === 'double') {
+                const stepNum = 3 - pendingAction.count;
+                drawBtn.className = 'btn btn-primary pending-double';
+                drawBtn.innerHTML = `<i class="fa-solid fa-bolt"></i> 선택 카드 뽑기 (${stepNum}/2)`;
+            }
+        }
+
+        function renderPool() {
+            const poolGrid = document.getElementById('cardPoolGrid');
+            poolGrid.innerHTML = '';
+            deck.forEach(() => {
+                const cardMini = document.createElement('div');
+                cardMini.className = 'card-mini';
+                poolGrid.appendChild(cardMini);
+            });
+        }
+
+        function renderHistory() {
+            const historyList = document.getElementById('historyList');
+            historyList.innerHTML = '';
+
+            if (drawnCards.length === 0) {
+                historyList.innerHTML = `
+          <p style="grid-column: 1/-1; text-align: center; color: #94a3b8; padding: 20px 0;">
+            아직 뽑힌 카드가 없습니다.
+          </p>`;
+                return;
+            }
+
+            drawnCards.forEach((card, index) => {
+                const item = document.createElement('div');
+                item.className = 'history-item';
+
+                let valClass = '';
+                let badgeHtml = '';
+                if (card.type === 'star') {
+                    item.classList.add('is-star');
+                    valClass = 'star';
+                    badgeHtml = `<span class="effect-badge badge-star">점수 계산 시 원하는 숫자</span>`;
+                } else if (card.type === 'xx') {
+                    item.classList.add('is-xx');
+                    valClass = 'xx';
+                    badgeHtml = '';
+                } else if (card.type === 'double') {
+                    item.classList.add('is-double');
+                    valClass = 'double';
+                    badgeHtml = '';
+                } else if (card.isDoubleEffect) {
+                    item.classList.add('is-double-effect');
+                    valClass = 'double-effect';
+                    badgeHtml = `<span class="effect-badge badge-double">2 중 택1</span>`
+                }
+
+                //let badgeHtml = card.isDoubleEffect ? `<span class="effect-badge badge-double">2 중 택1</span>` : '';
+
+                item.innerHTML = `
+          <div class="history-order">${index + 1}</div>
+          <div class="history-val ${valClass}">${card.value}</div>
+          ${badgeHtml}
+        `;
+                historyList.appendChild(item);
+            });
+        }
+
+        function renderTrashBin() {
+            const trashList = document.getElementById('trashList');
+            trashList.innerHTML = '';
+
+            if (trashBin.length === 0) {
+                trashList.innerHTML = `
+          <p style="text-align: center; color: #fca5a5; padding: 30px 0; font-size: 0.85rem;">
+            XX 카드가 나오면 버려질 카드 2장이 이곳에 보관됩니다.
+          </p>`;
+                return;
+            }
+
+            trashBin.forEach((card, index) => {
+                const item = document.createElement('div');
+                item.className = 'trash-item';
+                item.innerHTML = `
+          <div class="trash-val">${card.value}</div>
+          <div class="trash-tag">XX 버림 #${index + 1}</div>
+        `;
+                trashList.appendChild(item);
+            });
+        }
+
+        function updateStatusText() {
+            document.getElementById('remainingCountText').textContent = `남은 카드: ${deck.length}장`;
+            document.getElementById('drawnCountText').textContent = `진행: ${drawnCards.length}장 뽑음`;
+        }
+
+        /* TELESTRATIONS LOGIC */
+        let teleTimerInterval = null;
+        let teleTimeLeft = 60;
+
+        function startTeleTimer() {
+            if (teleTimerInterval) return;
+
+            if (teleTimeLeft <= 0) {
+                teleTimeLeft = 60;
+            }
+
+            const timerEl = document.getElementById('teleTimer');
+            timerEl.style.color = '#8b5cf6';
+            updateTeleTimerDisplay();
+
+            teleTimerInterval = setInterval(() => {
+                if (teleTimeLeft <= 0) {
+                    clearInterval(teleTimerInterval);
+                    teleTimerInterval = null;
+                    timerEl.textContent = '그림 그리기 시간 종료!';
+                    timerEl.style.color = '#ef4444';
+                    return;
+                }
+                teleTimeLeft--;
+                updateTeleTimerDisplay();
+            }, 1000);
+        }
+
+        function resetTeleTimer() {
+            clearInterval(teleTimerInterval);
+            teleTimerInterval = null;
+            teleTimeLeft = 60;
+            const timerEl = document.getElementById('teleTimer');
+            timerEl.style.color = '#8b5cf6';
+            updateTeleTimerDisplay();
+        }
+
+        function updateTeleTimerDisplay() {
+            const mins = Math.floor(teleTimeLeft / 60).toString().padStart(2, '0');
+            const secs = (teleTimeLeft % 60).toString().padStart(2, '0');
+            document.getElementById('teleTimer').textContent = `${mins}:${secs}`;
+        }
+
+        window.onload = resetGame;
+    </script>
+
+    <!-- ==================== HOT STREAK REACT COMPONENT ==================== -->
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const MASCOTS = [
+            { id: 'hotdog', name: '🌭 핫도그', color: 'bg-red-500' },
+            { id: 'bear', name: '🐻 곰돌이', color: 'bg-amber-600' },
+            { id: 'duck', name: '🦆 오리', color: 'bg-yellow-400' },
+            { id: 'rabbit', name: '🐰 토끼', color: 'bg-pink-400' }
+        ];
+
+        const CARDS = [
+            { id: 'f2', label: '🚀 +2칸 전진', val: 2 },
+            { id: 'f1', label: '🏃 +1칸 전진', val: 1 },
+            { id: 'b1', label: '🍌 -1칸 후퇴', val: -1 },
+            { id: 'stop', label: '🛑 얼음 (0)', val: 0 }
+        ];
+
+        function HotStreakApp() {
+            const [role, setRole] = useState(null); // 'host' | 'client'
+            const [peerId, setPeerId] = useState('');
+            const [targetHostId, setTargetHostId] = useState('');
+            const [teamNo, setTeamNo] = useState(1);
+
+            // State for Host
+            const [teamsData, setTeamsData] = useState(
+                Array.from({ length: 8 }, (_, i) => ({
+                    id: i + 1,
+                    connected: false,
+                    bet: null,
+                    card: null,
+                    score: 100
+                }))
+            );
+            const [gamePhase, setGamePhase] = useState('BETTING'); // BETTING, CARD, RACE, RESULT
+            const [mascotPositions, setMascotPositions] = useState({ hotdog: 0, bear: 0, duck: 0, rabbit: 0 });
+            const [round, setRound] = useState(1);
+
+            // PeerJS refs
+            const peerRef = useRef(null);
+            const connRef = useRef(null);
+            const connectionsRef = useRef({});
+
+            // Host Peer Init
+            const initHost = () => {
+                const id = Math.floor(1000 + Math.random() * 9000);
+                const peer = new Peer(id);
+                peerRef.current = peer;
+
+                peer.on('open', (id) => {
+                    setPeerId(id);
+                    setRole('host');
+                });
+
+                peer.on('connection', (conn) => {
+                    conn.on('data', (data) => {
+                        handleClientData(data);
+                    });
+
+                    conn.on('open', () => {
+                        // Handle new connection
+                    });
+                });
+            };
+
+            // Client Peer Init
+            const initClient = () => {
+                if (!targetHostId) return alert('호스트 코드를 입력하세요!');
+                const peer = new Peer();
+                peerRef.current = peer;
+
+                peer.on('open', () => {
+                    const conn = peer.connect(targetHostId);
+                    connRef.current = conn;
+
+                    conn.on('open', () => {
+                        setRole('client');
+                        conn.send({ type: 'JOIN', teamNo: Number(teamNo) });
+                    });
+
+                    conn.on('data', (data) => {
+                        if (data.type === 'PHASE_CHANGE') {
+                            setGamePhase(data.phase);
+                        }
+                    });
+                });
+            };
+
+            // Host Data Handler
+            const handleClientData = (data) => {
+                if (data.type === 'JOIN') {
+                    setTeamsData(prev => prev.map(t => t.id === data.teamNo ? { ...t, connected: true } : t));
+                } else if (data.type === 'SUBMIT_BET') {
+                    setTeamsData(prev => prev.map(t => t.id === data.teamNo ? { ...t, bet: data.bet } : t));
+                } else if (data.type === 'SUBMIT_CARD') {
+                    setTeamsData(prev => prev.map(t => t.id === data.teamNo ? { ...t, card: data.card } : t));
+                }
+            };
+
+            const broadcastPhase = (phase) => {
+                setGamePhase(phase);
+                Object.values(connectionsRef.current).forEach(conn => {
+                    if (conn.open) conn.send({ type: 'PHASE_CHANGE', phase });
+                });
+            };
+
+            // Run Race Simulation
+            const runRace = () => {
+                broadcastPhase('RACE');
+                let newPos = { ...mascotPositions };
+
+                // Apply Card Effects
+                teamsData.forEach(t => {
+                    if (t.card) {
+                        const cardObj = CARDS.find(c => c.id === t.card.cardId);
+                        if (cardObj && newPos[t.card.mascotId] !== undefined) {
+                            newPos[t.card.mascotId] = Math.max(0, Math.min(10, newPos[t.card.mascotId] + cardObj.val));
+                        }
+                    }
+                });
+
+                // Animate Race
+                setTimeout(() => {
+                    setMascotPositions(newPos);
+
+                    // Calculate Winner
+                    const sorted = Object.entries(newPos).sort((a, b) => b[1] - a[1]);
+                    const winnerId = sorted[0][0];
+
+                    // Calculate Scores
+                    setTeamsData(prev => prev.map(t => {
+                        if (t.bet === winnerId) {
+                            return { ...t, score: t.score + 50 };
+                        }
+                        return t;
+                    }));
+
+                    setTimeout(() => broadcastPhase('RESULT'), 2000);
+                }, 1000);
+            };
+
+            const nextRound = () => {
+                setMascotPositions({ hotdog: 0, bear: 0, duck: 0, rabbit: 0 });
+                setTeamsData(prev => prev.map(t => ({ ...t, bet: null, card: null })));
+                setRound(r => r + 1);
+                broadcastPhase('BETTING');
+            };
+
+            // Selection Screen
+            if (!role) {
+                return (
+                    <div className="flex flex-col items-center justify-center p-8 min-h-[600px]">
+                        <h1 className="text-4xl font-extrabold mb-8 text-amber-400">🔥 Hot Streak Workshop</h1>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-md">
+                            <button onClick={initHost} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-6 rounded-xl shadow-lg transition flex flex-col items-center justify-center gap-2">
+                                <span className="text-2xl">📺</span>
+                                <span>메인 스크린 생성 (Host)</span>
+                            </button>
+                            <div className="bg-slate-800 p-6 rounded-xl flex flex-col gap-3">
+                                <h2 className="text-xl font-bold text-slate-100">📱 조별 접속 (Client)</h2>
+                                <input
+                                    type="text"
+                                    placeholder="호스트 코드 입력"
+                                    value={targetHostId}
+                                    onChange={e => setTargetHostId(e.target.value)}
+                                    className="p-2.5 rounded bg-slate-700 border border-slate-600 text-white placeholder-slate-400 focus:outline-none focus:border-indigo-500"
+                                />
+                                <select
+                                    value={teamNo}
+                                    onChange={e => setTeamNo(e.target.value)}
+                                    className="p-2.5 rounded bg-slate-700 border border-slate-600 text-white focus:outline-none focus:border-indigo-500"
+                                >
+                                    {Array.from({ length: 8 }, (_, i) => (
+                                        <option key={i + 1} value={i + 1}>{i + 1}조</option>
+                                    ))}
+                                </select>
+                                <button onClick={initClient} className="bg-emerald-600 hover:bg-emerald-500 font-bold py-3 rounded-lg transition mt-1 text-white">
+                                    접속하기
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            // HOST DISPLAY
+            if (role === 'host') {
+                return (
+                    <div className="p-6 max-w-7xl mx-auto flex flex-col gap-6">
+                        {/* Header & Control Panel */}
+                        <div className="bg-slate-800 p-4 rounded-xl flex flex-wrap justify-between items-center gap-4 border border-slate-700">
+                            <div>
+                                <h1 className="text-2xl font-bold text-amber-400">🔥 Hot Streak [Round {round}]</h1>
+                                <p className="text-sm text-slate-400">접속 코드: <span className="text-white font-mono font-bold">{peerId}</span></p>
+                            </div>
+                            <div className="flex gap-2">
+                                {gamePhase === 'BETTING' && (
+                                    <button onClick={() => broadcastPhase('CARD')} className="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg font-bold transition">카드 제출 단계로</button>
+                                )}
+                                {gamePhase === 'CARD' && (
+                                    <button onClick={runRace} className="bg-rose-600 hover:bg-rose-500 px-4 py-2 rounded-lg font-bold transition">🏎️ 레이스 시작!</button>
+                                )}
+                                {gamePhase === 'RESULT' && (
+                                    <button onClick={nextRound} className="bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-lg font-bold transition">다음 라운드 ➡️</button>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Race Track */}
+                        <div className="bg-slate-800 p-6 rounded-xl border border-slate-700">
+                            <h2 className="text-xl font-bold mb-4">🏟️ 경기장</h2>
+                            <div className="flex flex-col gap-4">
+                                {MASCOTS.map(m => (
+                                    <div key={m.id} className="flex items-center gap-4">
+                                        <span className="w-24 font-bold">{m.name}</span>
+                                        <div className="flex-1 bg-slate-700 h-10 rounded-lg relative overflow-hidden flex items-center px-2">
+                                            {/* Track Grid */}
+                                            <div className="absolute inset-0 grid grid-cols-11 pointer-events-none opacity-20">
+                                                {Array.from({ length: 11 }).map((_, i) => (
+                                                    <div key={i} className="border-r border-white"></div>
+                                                ))}
+                                            </div>
+                                            {/* Mascot Marker */}
+                                            <div
+                                                className={`h-8 w-8 rounded-full ${m.color} flex items-center justify-center font-bold text-xs transition-all duration-700 shadow-md text-white`}
+                                                style={{ left: `${(mascotPositions[m.id] / 10) * 90}%`, position: 'relative' }}
+                                            >
+                                                {mascotPositions[m.id]}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Teams Dashboard */}
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            {teamsData.map(t => (
+                                <div key={t.id} className={`p-4 rounded-xl border ${t.connected ? 'bg-slate-800 border-slate-600' : 'bg-slate-800/40 border-slate-700/50 opacity-50'}`}>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className="font-bold text-lg">{t.id}조</span>
+                                        <span className="text-amber-400 font-bold">{t.score} pt</span>
+                                    </div>
+                                    <div className="text-xs space-y-1 text-slate-300">
+                                        <div>베팅: {t.bet ? MASCOTS.find(m => m.id === t.bet)?.name : '⏳ 대기 중'}</div>
+                                        <div>카드: {t.card ? '✅ 제출 완료' : '⏳ 대기 중'}</div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+            }
+
+            // CLIENT DISPLAY
+            if (role === 'client') {
+                const myTeam = teamsData.find(t => t.id === Number(teamNo));
+
+                const sendBet = (mascotId) => {
+                    if (connRef.current) connRef.current.send({ type: 'SUBMIT_BET', teamNo: Number(teamNo), bet: mascotId });
+                    setTeamsData(prev => prev.map(t => t.id === Number(teamNo) ? { ...t, bet: mascotId } : t));
+                };
+
+                const sendCard = (mascotId, cardId) => {
+                    if (connRef.current) connRef.current.send({ type: 'SUBMIT_CARD', teamNo: Number(teamNo), card: { mascotId, cardId } });
+                    setTeamsData(prev => prev.map(t => t.id === Number(teamNo) ? { ...t, card: { mascotId, cardId } } : t));
+                };
+
+                return (
+                    <div className="p-4 max-w-md mx-auto min-h-[550px] flex flex-col justify-between">
+                        <div>
+                            <div className="bg-slate-800 p-4 rounded-xl flex justify-between items-center mb-6 border border-slate-700">
+                                <span className="text-xl font-bold text-amber-400">{teamNo}조 화면</span>
+                                <span className="text-sm bg-slate-700 px-3 py-1 rounded-full font-bold">Phase: {gamePhase}</span>
+                            </div>
+
+                            {/* BETTING PHASE */}
+                            {gamePhase === 'BETTING' && (
+                                <div>
+                                    <h2 className="text-lg font-bold mb-4">🎯 우승 예상 마스코트에 베팅하세요</h2>
+                                    <div className="grid grid-cols-1 gap-3">
+                                        {MASCOTS.map(m => (
+                                            <button
+                                                key={m.id}
+                                                onClick={() => sendBet(m.id)}
+                                                className={`p-4 rounded-xl font-bold flex justify-between items-center border transition ${myTeam?.bet === m.id ? 'bg-amber-500/20 border-amber-400 text-amber-300' : 'bg-slate-800 border-slate-700'}`}
+                                            >
+                                                <span>{m.name}</span>
+                                                {myTeam?.bet === m.id && <span>SELECTED</span>}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* CARD PHASE */}
+                            {gamePhase === 'CARD' && (
+                                <div>
+                                    <h2 className="text-lg font-bold mb-4">🃏 레이스에 적용할 카드를 선택하세요</h2>
+                                    <CardSelection MASCOTS={MASCOTS} CARDS={CARDS} onSubmit={sendCard} currentCard={myTeam?.card} />
+                                </div>
+                            )}
+
+                            {/* WAIT / RESULT PHASE */}
+                            {(gamePhase === 'RACE' || gamePhase === 'RESULT') && (
+                                <div className="text-center py-12">
+                                    <div className="text-4xl mb-4">🏎️</div>
+                                    <h2 className="text-xl font-bold mb-2">레이스가 진행 중입니다!</h2>
+                                    <p className="text-slate-400 text-sm">메인 화면을 확인해 주세요.</p>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="text-center text-xs text-slate-500 py-4">Hot Streak Workshop Assistant</div>
+                    </div>
+                );
+            }
+        }
+
+        // Client Sub-component for Card Selection
+        function CardSelection({ MASCOTS, CARDS, onSubmit, currentCard }) {
+            const [selectedMascot, setSelectedMascot] = useState(MASCOTS[0].id);
+            const [selectedCard, setSelectedCard] = useState(CARDS[0].id);
+
+            return (
+                <div className="bg-slate-800 p-4 rounded-xl flex flex-col gap-4 border border-slate-700">
+                    <div>
+                        <label className="text-xs text-slate-400 block mb-2">대상 마스코트</label>
+                        <div className="grid grid-cols-2 gap-2">
+                            {MASCOTS.map(m => (
+                                <button
+                                    key={m.id}
+                                    onClick={() => setSelectedMascot(m.id)}
+                                    className={`p-2 rounded text-sm font-bold border transition ${selectedMascot === m.id ? 'bg-blue-600 border-blue-400' : 'bg-slate-700 border-slate-600'}`}
+                                >
+                                    {m.name}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div>
+                        <label className="text-xs text-slate-400 block mb-2">적용할 카드</label>
+                        <div className="grid grid-cols-2 gap-2">
+                            {CARDS.map(c => (
+                                <button
+                                    key={c.id}
+                                    onClick={() => setSelectedCard(c.id)}
+                                    className={`p-2 rounded text-sm font-bold border transition ${selectedCard === c.id ? 'bg-emerald-600 border-emerald-400' : 'bg-slate-700 border-slate-600'}`}
+                                >
+                                    {c.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <button
+                        onClick={() => onSubmit(selectedMascot, selectedCard)}
+                        className="w-full bg-amber-500 hover:bg-amber-400 text-slate-900 font-extrabold py-3 rounded-lg transition mt-2"
+                    >
+                        {currentCard ? '카드 변경 및 제출' : '카드 제출하기'}
+                    </button>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('react-hotstreak-root'));
+        root.render(<HotStreakApp />);
+    </script>
 </body>
+
 </html>
