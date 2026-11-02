@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>다빈치 코드</title>
+<style>
+:root{
+  --felt:#183a32;
+  --felt-deep:#0f2620;
+  --ink:#16151a;
+  --ivory:#f1e8d3;
+  --bone:#d8cbab;
+  --brass:#c9a455;
+  --oxblood:#9a3b33;
+  --moss:#8fb58a;
+  --line:rgba(241,232,211,.14);
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  min-height:100vh;
+  color:var(--ivory);
+  font-family:"Noto Sans KR",system-ui,-apple-system,sans-serif;
+  background:radial-gradient(1200px 600px at 50% -10%, #245247 0%, var(--felt) 35%, var(--felt-deep) 100%);
+}
+.wrap{max-width:1000px;margin:0 auto;padding:28px 18px 56px}
+h1,h2{font-family:"Noto Serif KR","Nanum Myeongjo",Georgia,serif;font-weight:700;margin:0}
+h1{font-size:34px;letter-spacing:-.01em}
+h2{font-size:24px}
+
+.top{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;border-bottom:1px solid var(--line);padding-bottom:16px;margin-bottom:20px}
+.sub{margin:6px 0 0;color:var(--bone);font-size:14px}
+.pile{font-size:14px;color:var(--bone);border:1px solid var(--line);padding:8px 14px;border-radius:999px;white-space:nowrap}
+
+.seats{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:14px}
+.seat{background:rgba(7,20,17,.35);border:1px solid var(--line);border-radius:16px;padding:14px 14px 12px;transition:border-color .2s,box-shadow .2s}
+.seat.turn{border-color:var(--brass);box-shadow:0 0 0 4px rgba(201,164,85,.14)}
+.seat.out{opacity:.4}
+.seat-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.seat-name{font-family:"Noto Serif KR","Nanum Myeongjo",serif;font-size:19px;font-weight:700}
+.seat-meta{font-size:12px;color:var(--bone)}
+
+.hand{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:12px;min-height:84px}
+
+.tile{
+  position:relative;width:50px;height:76px;border-radius:8px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  user-select:none;transition:transform .15s;
+}
+.tile.w{background:var(--ivory);color:var(--ink);box-shadow:0 4px 0 #a79a7a}
+.tile.b{background:#24232a;color:var(--ivory);box-shadow:0 4px 0 #0a0a0c,inset 0 0 0 1px rgba(255,255,255,.06)}
+.tile .val{font-family:"Noto Serif KR","Nanum Myeongjo",serif;font-size:26px;font-weight:700;line-height:1}
+.tile .lbl{font-size:10px;margin-top:6px;opacity:.7}
+.tile.hid.w{background:linear-gradient(160deg,#e7dcc2,#cdbf9c);color:#7a6a46}
+.tile.hid.b{background:linear-gradient(160deg,#2c2b33,#17161b);color:#6b6876}
+.tile.open{
+  transform:translateY(-10px);
+  box-shadow:0 0 0 2px var(--brass), 0 0 18px rgba(201,164,85,.45), 0 10px 14px rgba(0,0,0,.45);
+}
+.tile.open.w{background:#fbf5e6}
+.tile.open.b{background:#34323b}
+.tile.new::after{content:"";position:absolute;top:-9px;left:50%;transform:translateX(-50%);width:6px;height:6px;border-radius:50%;background:var(--moss)}
+.tile.pick{cursor:pointer}
+.tile.pick:hover{transform:translateY(-5px)}
+.tile.sel{outline:3px solid var(--oxblood);outline-offset:3px;transform:translateY(-5px)}
+
+.gap{
+  width:18px;height:76px;padding:0;border:1px dashed var(--brass);border-radius:6px;
+  background:rgba(201,164,85,.08);color:var(--brass);font-size:18px;cursor:pointer;
+}
+.gap:hover,.gap:focus-visible{background:rgba(201,164,85,.35);outline:none}
+
+.panel{margin-top:18px;background:rgba(7,20,17,.45);border:1px solid var(--line);border-radius:16px;padding:18px}
+.panel p{margin:0 0 12px;color:var(--bone);line-height:1.6}
+.panel strong{color:var(--ivory)}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+
+.grid{display:grid;grid-template-columns:repeat(7,1fr);gap:8px}
+.num{
+  font-family:"Noto Serif KR","Nanum Myeongjo",serif;font-size:18px;font-weight:700;
+  padding:10px 0;border:0;border-radius:8px;background:var(--ivory);color:var(--ink);cursor:pointer;
+}
+.num.j{background:var(--brass)}
+.num:hover{filter:brightness(1.07)}
+
+.btn{
+  font:inherit;font-weight:700;background:var(--brass);color:#1c1a14;
+  border:0;border-radius:10px;padding:10px 16px;cursor:pointer;
+}
+.btn:hover{filter:brightness(1.06)}
+.btn.ghost{background:transparent;color:var(--ivory);border:1px solid rgba(241,232,211,.35)}
+
+.intro{max-width:620px;margin:40px auto 0}
+.intro p{color:var(--bone);line-height:1.7}
+.mode{margin-top:28px;padding-top:20px;border-top:1px solid var(--line)}
+.mode h2{font-size:20px}
+.mode p{color:var(--bone);margin:6px 0 0;font-size:14px}
+.rules{margin-top:22px;color:var(--bone);font-size:14px;line-height:1.7}
+.rules summary{cursor:pointer;color:var(--ivory);font-weight:700;margin-bottom:8px}
+
+.log{margin-top:18px;font-size:14px;color:var(--bone);border-top:1px solid var(--line);padding-top:12px}
+.log p{margin:5px 0;line-height:1.5}
+
+@media (max-width:520px){
+  .tile{width:42px;height:66px}
+  .tile .val{font-size:22px}
+  .gap{height:66px;width:14px}
+  .grid{grid-template-columns:repeat(5,1fr)}
+  h1{font-size:28px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="app"></div>
+</div>
+
+<script>
+const $app = document.getElementById('app');
+let G = null;          // game state
+let aiTimer = null;
+let record = { win: 0, lose: 0 };   // 컴퓨터와 1대1 전적 (페이지를 떠나면 초기화)
+
+const COLOR = { b: '검정', w: '흰색' };
+
+// AI 난이도: maxSize는 추리 가능한 최대 후보 수, gamble은 확신이 없을 때 도전할 확률,
+// cont는 맞힌 뒤 계속 추리할 확률
+const DIFF = {
+  easy:   { maxSize: 6, gamble: 0.05, cont: 0.3 },
+  normal: { maxSize: 4, gamble: 0.15, cont: 0.6 },
+  hard:   { maxSize: 3, gamble: 0.02, cont: 0.85 }
+};
+const lab = v => (v === 'J' ? '조커' : String(v));
+const tkey = t => t.v * 2 + (t.c === 'w' ? 1 : 0);   // 숫자 블록 전용: 같은 숫자는 검정이 왼쪽
+const isOver = () => G !== null && G.winner !== null;
+const humanCanGuess = () => G && !isOver() && G.cur === 0 && G.phase === 'guess';
+
+function note(msg) {
+  G.log.push(msg);
+  if (G.log.length > 60) G.log.shift();
+}
+
+function makeTiles() {
+  const out = [];
+  let id = 0;
+  for (const c of ['b', 'w']) {
+    for (let v = 0; v <= 11; v++) out.push({ id: id++, c, v, open: false });
+    out.push({ id: id++, c, v: 'J', open: false });
+  }
+  return out;
+}
+
+function shuffle(a) {
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function insertNumeric(hand, t) {
+  const k = tkey(t);
+  const idx = hand.findIndex(h => h.v !== 'J' && tkey(h) > k);
+  if (idx < 0) hand.push(t);
+  else hand.splice(idx, 0, t);
+}
+
+function insertAt(hand, t, g) {
+  hand.splice(g, 0, t);
+}
+
+/* ---------- 게임 시작 ---------- */
+
+function newGame(total, diff = 'normal') {
+  clearTimeout(aiTimer);
+  aiTimer = null;
+
+  const deck = shuffle(makeTiles());
+  const per = total === 4 ? 3 : 4;   // 2~3명은 4개, 4명은 3개
+  const players = Array.from({ length: total }, (_, i) => ({
+    name: i === 0 ? '나' : (total === 2 ? '컴퓨터' : `AI ${i}`),
+    human: i === 0,
+    hand: [],
+    out: false
+  }));
+
+  for (let r = 0; r < per; r++) {
+    for (const p of players) {
+      const idx = deck.findIndex(t => t.v !== 'J');   // 시작패에는 조커가 없음
+      p.hand.push(deck.splice(idx, 1)[0]);
+    }
+  }
+  players.forEach(p => p.hand.sort((a, b) => tkey(a) - tkey(b)));
+
+  G = {
+    diff,
+    players,
+    pile: shuffle(deck),
+    cur: 0,
+    phase: 'guess',
+    drawn: null,
+    pending: null,
+    target: null,
+    winner: null,
+    log: []
+  };
+  note('게임을 시작합니다. 왼쪽이 작은 수, 오른쪽이 큰 수입니다.');
+  startTurn();
+}
+
+/* ---------- 턴 진행 ---------- */
+
+function startTurn() {
+  G.drawn = null;
+  G.target = null;
+  G.pending = null;
+  if (isOver()) return render();
+
+  const idx = G.cur;
+  const p = G.players[idx];
+
+  if (G.pile.length) {
+    const t = G.pile.pop();
+    if (t.v === 'J' && p.human) {
+      G.pending = t;
+      G.phase = 'placeJoker';
+      note('나: 조커를 뽑았습니다. 놓을 자리를 고르세요.');
+      return render();
+    }
+    if (t.v === 'J') insertAt(p.hand, t, Math.floor(Math.random() * (p.hand.length + 1)));
+    else insertNumeric(p.hand, t);
+    G.drawn = t;
+    note(`${p.name}이(가) 블록을 뽑았습니다.`);
+  } else {
+    note(`${p.name}: 남은 블록이 없어 뽑지 않습니다.`);
+  }
+
+  G.phase = 'guess';
+  render();
+  if (!p.human) aiTimer = setTimeout(aiGuessStep, 900);
+}
+
+function endTurn() {
+  G.drawn = null;
+  G.target = null;
+  G.pending = null;
+  if (isOver()) return render();
+  let n = G.cur;
+  do {
+    n = (n + 1) % G.players.length;
+  } while (G.players[n].out);
+  G.cur = n;
+  startTurn();
+}
+
+function placeJoker(g) {
+  if (!G || G.phase !== 'placeJoker') return;
+  insertAt(G.players[0].hand, G.pending, g);
+  G.drawn = G.pending;
+  G.pending = null;
+  G.phase = 'guess';
+  note('나: 조커를 놓았습니다.');
+  render();
+}
+
+/* ---------- 공개, 탈락, 벌칙 ---------- */
+
+function reveal(t, oi) {
+  t.open = true;
+  const p = G.players[oi];
+  note(`→ ${p.name}의 ${COLOR[t.c]} 블록 ${lab(t.v)} 공개`);
+  checkOut(oi);
+}
+
+function checkOut(oi) {
+  const p = G.players[oi];
+  if (p.out || !p.hand.every(t => t.open)) return;
+  p.out = true;
+  note(`${p.name}의 블록이 모두 공개되어 탈락했습니다.`);
+  const alive = G.players.map((_, i) => i).filter(i => !G.players[i].out);
+  if (alive.length === 1) {
+    G.winner = alive[0];
+    if (G.players.length === 2) {
+      if (alive[0] === 0) record.win++;
+      else record.lose++;
+    }
+    note(`${G.players[G.winner].name} 승리!`);
+  }
+}
+
+// 틀렸을 때: 방금 뽑은 블록을 공개한다. 더미가 비어 뽑은 블록이 없으면 무작위 블록을 공개한다.
+function penalty(idx) {
+  const p = G.players[idx];
+  const t = (G.drawn && !G.drawn.open && p.hand.includes(G.drawn))
+    ? G.drawn
+    : shuffle(p.hand.filter(x => !x.open))[0];
+  if (t) reveal(t, idx);
+}
+
+/* ---------- 사람의 추리 ---------- */
+
+function pickTarget(id) {
+  if (!humanCanGuess()) return;
+  let tile = null, owner = -1;
+  G.players.forEach((p, oi) => {
+    if (oi === 0 || p.out || tile) return;
+    const t = p.hand.find(x => x.id === id && !x.open);
+    if (t) { tile = t; owner = oi; }
+  });
+  if (!tile) return;
+  G.target = { tile, owner };
+  render();
+}
+
+function submitGuess(v) {
+  if (!humanCanGuess() || !G.target) return;
+  const { tile, owner } = G.target;
+  const ok = tile.v === v;
+  note(`나: ${G.players[owner].name}의 ${COLOR[tile.c]} 블록을 ${lab(v)}(으)로 맞혀 봤습니다 → ${ok ? '맞음' : '틀림'}`);
+  G.target = null;
+  if (ok) {
+    reveal(tile, owner);
+    if (isOver()) return render();
+    G.phase = 'afterCorrect';
+    return render();
+  }
+  penalty(0);
+  endTurn();
+}
+
+function continueGuess() {
+  if (!G || G.phase !== 'afterCorrect') return;
+  G.phase = 'guess';
+  G.target = null;
+  render();
+}
+
+function stopGuess() {
+  if (!G || G.phase !== 'afterCorrect') return;
+  note('나: 차례를 넘겼습니다.');
+  endTurn();
+}
+
+/* ---------- AI ---------- */
+
+// 숨겨진 블록이 가질 수 있는 값들을 추론한다.
+function candidates(owner, t, guesserIdx) {
+  const known = new Set();
+  const K = x => `${x.v}${x.c}`;
+  G.players[guesserIdx].hand.forEach(x => known.add(K(x)));
+  G.players.forEach(p => p.hand.forEach(x => { if (x.open) known.add(K(x)); }));
+
+  // 같은 소유자 손패에서, 공개된 숫자 블록 사이에 끼어 있어야 한다는 제약
+  const idx = owner.hand.indexOf(t);
+  let lo = -1, hi = 99;
+  owner.hand.forEach((x, j) => {
+    if (!x.open || x.v === 'J') return;
+    const k = tkey(x);
+    if (j < idx) lo = Math.max(lo, k);
+    else if (j > idx) hi = Math.min(hi, k);
+  });
+
+  const out = [];
+  for (let n = 0; n <= 11; n++) {
+    const k = n * 2 + (t.c === 'w' ? 1 : 0);
+    if (k > lo && k < hi && !known.has(`${n}${t.c}`)) out.push(n);
+  }
+  if (!known.has(`J${t.c}`)) out.push('J');
+  return out;
+}
+
+function aiGuessStep() {
+  aiTimer = null;
+  if (isOver()) return render();
+
+  const idx = G.cur;
+  const me = G.players[idx];
+  const opts = [];
+  G.players.forEach((p, oi) => {
+    if (oi === idx || p.out) return;
+    p.hand.forEach(t => {
+      if (t.open) return;
+      const c = candidates(p, t, idx);
+      if (c.length) opts.push({ t, oi, c });
+    });
+  });
+
+  if (!opts.length) return endTurn();
+
+  opts.sort((a, b) => a.c.length - b.c.length);
+  const best = opts[0];
+
+  // 확신이 없으면 가끔만 도전하고 차례를 넘긴다
+  const P = DIFF[G.diff] || DIFF.normal;
+  if (best.c.length > P.maxSize && Math.random() > P.gamble) {
+    note(`${me.name}이(가) 확신이 없어 차례를 넘겼습니다.`);
+    return endTurn();
+  }
+
+  const guess = best.c[Math.floor(Math.random() * best.c.length)];
+  const ok = best.t.v === guess;
+  const owner = G.players[best.oi];
+  note(`${me.name}: ${owner.name}의 ${COLOR[best.t.c]} 블록을 ${lab(guess)}(으)로 맞혀 봤습니다 → ${ok ? '맞음' : '틀림'}`);
+
+  if (ok) {
+    reveal(best.t, best.oi);
+    if (isOver()) return render();
+    if (Math.random() < P.cont) {
+      render();
+      aiTimer = setTimeout(aiGuessStep, 1000);
+    } else {
+      note(`${me.name}이(가) 차례를 넘겼습니다.`);
+      endTurn();
+    }
+  } else {
+    penalty(idx);
+    endTurn();
+  }
+}
+
+/* ---------- 화면 ---------- */
+
+function tile(t, owner) {
+  const seeAll = owner === 0 || t.open;
+  const canPick = humanCanGuess() && owner !== 0 && !t.open && !G.players[owner].out;
+  const cls = [
+    'tile', t.c,
+    seeAll ? '' : 'hid',
+    t.open ? 'open' : '',
+    t === G.drawn ? 'new' : '',
+    canPick ? 'pick' : '',
+    G.target && G.target.tile === t ? 'sel' : ''
+  ].join(' ');
+  const attr = canPick ? `data-act="pick" data-id="${t.id}"` : '';
+  const val = seeAll ? (t.v === 'J' ? '★' : t.v) : '?';
+  const sub = seeAll && t.v === 'J' ? `조커` : COLOR[t.c];
+  return `<div class="${cls}" ${attr}><span class="val">${val}</span><span class="lbl">${sub}</span></div>`;
+}
+
+function gap(j) {
+  return `<button class="gap" data-act="gap" data-g="${j}" aria-label="여기에 놓기">+</button>`;
+}
+
+function seat(p, i) {
+  const hidden = p.hand.filter(t => !t.open).length;
+  const turn = !isOver() && G.cur === i;
+  let tiles;
+  if (G.phase === 'placeJoker' && i === 0) {
+    tiles = gap(0);
+    p.hand.forEach((t, j) => { tiles += tile(t, i) + gap(j + 1); });
+  } else {
+    tiles = p.hand.map(t => tile(t, i)).join('');
+  }
+  return `
+    <div class="seat ${turn ? 'turn' : ''} ${p.out ? 'out' : ''}">
+      <div class="seat-head">
+        <span class="seat-name">${p.name}${p.out ? ' (탈락)' : ''}</span>
+        <span class="seat-meta">${p.out ? '모두 공개됨' : `숨긴 블록 ${hidden}개`}</span>
+      </div>
+      <div class="hand">${tiles}</div>
+    </div>`;
+}
+
+function controls() {
+  if (isOver()) {
+    const w = G.players[G.winner];
+    return `
+      <div class="panel">
+        <h2>${w.human ? '이겼습니다!' : `${w.name} 승리`}</h2>
+        <p>마지막까지 숫자가 가려진 블록을 지킨 사람이 이깁니다.</p>
+        <div class="row">
+          <button class="btn" data-act="again">같은 조건으로 다시</button>
+          <button class="btn ghost" data-act="restart">처음 화면으로</button>
+        </div>
+      </div>`;
+  }
+
+  if (G.phase === 'placeJoker') {
+    return `
+      <div class="panel">
+        <div class="row">
+          ${tile(G.pending, 0)}
+          <p>뽑은 조커를 놓을 자리를 고르세요. 점선 칸을 누르면 그 자리에 들어갑니다.</p>
+        </div>
+      </div>`;
+  }
+
+  if (G.cur !== 0) {
+    return `<div class="panel"><p>${G.players[G.cur].name}이(가) 생각하는 중입니다…</p></div>`;
+  }
+
+  if (G.phase === 'afterCorrect') {
+    return `
+      <div class="panel">
+        <p>맞혔습니다. 한 번 더 추리하거나 차례를 넘길 수 있어요.</p>
+        <div class="row">
+          <button class="btn" data-act="continue">계속 추리</button>
+          <button class="btn ghost" data-act="stop">차례 넘기기</button>
+        </div>
+      </div>`;
+  }
+
+  if (!G.target) {
+    return `<div class="panel"><p>다른 사람의 뒤집힌 블록 하나를 고르세요. 색은 보이고 숫자는 가려져 있습니다.</p></div>`;
+  }
+
+  const o = G.players[G.target.owner];
+  const values = [...Array(12).keys(), 'J'];
+  return `
+    <div class="panel">
+      <p><strong>${o.name}</strong>의 ${COLOR[G.target.tile.c]} 블록 숫자는 무엇일까요?</p>
+      <div class="grid">
+        ${values.map(v => `<button class="num ${v === 'J' ? 'j' : ''}" data-act="guess" data-v="${v}">${lab(v)}</button>`).join('')}
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button class="btn ghost" data-act="cancel">다른 블록 고르기</button>
+      </div>
+    </div>`;
+}
+
+function render() {
+  if (!G) {
+    $app.innerHTML = `
+      <section class="intro">
+        <h1>다빈치 코드</h1>
+        <p>상대의 블록 숫자를 추리하는 두뇌 게임입니다. 컴퓨터와 1대1로 겨루거나, AI들과 여럿이 할 수 있습니다.</p>
+        <div class="mode">
+          <h2>컴퓨터와 1대1</h2>
+          <p>난이도를 고르세요. 전적은 페이지를 닫을 때까지 기록됩니다.</p>
+          <div class="row" style="margin-top:12px">
+            <button class="btn" data-act="start" data-n="2" data-diff="easy">쉬움</button>
+            <button class="btn" data-act="start" data-n="2" data-diff="normal">보통</button>
+            <button class="btn" data-act="start" data-n="2" data-diff="hard">어려움</button>
+          </div>
+        </div>
+        <div class="mode">
+          <h2>여러 명이서</h2>
+          <div class="row" style="margin-top:12px">
+            <button class="btn ghost" data-act="start" data-n="3" data-diff="normal">3명</button>
+            <button class="btn ghost" data-act="start" data-n="4" data-diff="normal">4명</button>
+          </div>
+        </div>
+        <details class="rules">
+          <summary>규칙 요약</summary>
+          <p>블록은 검정과 흰색이 각각 숫자 0~11과 조커 하나씩, 모두 26개입니다. 내 블록은 숫자가 보이고, 남의 블록은 색만 보입니다. 내 차례에는 블록을 한 장 뽑아 알맞은 자리에 넣고, 남의 블록 하나의 숫자를 맞혀야 합니다. 맞히면 그 블록이 공개되고, 계속 추리하거나 차례를 넘길 수 있습니다. 틀리면 방금 뽑은 블록이 공개되고 차례가 끝납니다. 블록이 모두 공개된 사람이 탈락하며, 마지막까지 남은 사람이 이깁니다.</p>
+        </details>
+      </section>`;
+    return;
+  }
+
+  const status = isOver() ? '게임 종료' : (G.cur === 0 ? '내 차례' : `${G.players[G.cur].name}의 차례`);
+  $app.innerHTML = `
+    <div class="top">
+      <div>
+        <h1>다빈치 코드</h1>
+        <p class="sub">${status}</p>
+      </div>
+      <div class="pile">${G.players.length === 2 ? `전적 ${record.win}승 ${record.lose}패 · ` : ''}남은 블록 ${G.pile.length}개</div>
+    </div>
+    <div class="seats">${G.players.map((p, i) => seat(p, i)).join('')}</div>
+    ${controls()}
+    <div class="log">${G.log.slice(-7).map(m => `<p>${m}</p>`).join('')}</div>`;
+}
+
+/* ---------- 이벤트 ---------- */
+
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-act]');
+  if (!el) return;
+  switch (el.dataset.act) {
+    case 'start':    newGame(Number(el.dataset.n), el.dataset.diff || 'normal'); break;
+    case 'again':    newGame(G.players.length, G.diff); break;
+    case 'restart':  clearTimeout(aiTimer); G = null; render(); break;
+    case 'pick':     pickTarget(Number(el.dataset.id)); break;
+    case 'guess':    submitGuess(el.dataset.v === 'J' ? 'J' : Number(el.dataset.v)); break;
+    case 'cancel':   if (G) { G.target = null; render(); } break;
+    case 'gap':      placeJoker(Number(el.dataset.g)); break;
+    case 'continue': continueGuess(); break;
+    case 'stop':     stopGuess(); break;
+  }
+});
+
+render();
+</script>
+</body>
+</html>
