@@ -225,6 +225,33 @@ function newGame(total, diff = 'normal') {
 
 /* ---------- 턴 진행 ---------- */
 
+// 더미에서 지정한 색의 블록 한 장을 뽑는다. 숫자는 뽑기 전까지 알 수 없다.
+function drawFrom(idx, color) {
+  const p = G.players[idx];
+  const i = G.pile.findIndex(t => t.c === color);
+  if (i < 0) return;
+  const t = G.pile.splice(i, 1)[0];
+  if (t.v === 'J' && p.human) {
+    G.pending = t;
+    G.phase = 'placeJoker';
+    note('나: 조커를 뽑았습니다. 놓을 자리를 고르세요.');
+    return render();
+  }
+  if (t.v === 'J') insertAt(p.hand, t, Math.floor(Math.random() * (p.hand.length + 1)));
+  else insertNumeric(p.hand, t);
+  G.drawn = t;
+  note(`${p.name}이(가) ${COLOR[color]} 더미에서 블록을 뽑았습니다.`);
+  G.phase = 'guess';
+  render();
+  if (!p.human) aiTimer = setTimeout(aiGuessStep, aiDelay());
+}
+
+// 컴퓨터가 뽑을 색: 남은 색 중에서 고른다
+function aiPickColor() {
+  const colors = [...new Set(G.pile.map(t => t.c))];
+  return colors[Math.floor(Math.random() * colors.length)];
+}
+
 function startTurn() {
   G.drawn = null;
   G.target = null;
@@ -234,25 +261,22 @@ function startTurn() {
   const idx = G.cur;
   const p = G.players[idx];
 
-  if (G.pile.length) {
-    const t = G.pile.pop();
-    if (t.v === 'J' && p.human) {
-      G.pending = t;
-      G.phase = 'placeJoker';
-      note('나: 조커를 뽑았습니다. 놓을 자리를 고르세요.');
-      return render();
-    }
-    if (t.v === 'J') insertAt(p.hand, t, Math.floor(Math.random() * (p.hand.length + 1)));
-    else insertNumeric(p.hand, t);
-    G.drawn = t;
-    note(`${p.name}이(가) 블록을 뽑았습니다.`);
-  } else {
+  if (!G.pile.length) {
     note(`${p.name}: 남은 블록이 없어 뽑지 않습니다.`);
+    G.phase = 'guess';
+    render();
+    if (!p.human) aiTimer = setTimeout(aiGuessStep, aiDelay());
+    return;
   }
 
-  G.phase = 'guess';
-  render();
-  if (!p.human) aiTimer = setTimeout(aiGuessStep, aiDelay());
+  const colors = [...new Set(G.pile.map(t => t.c))];
+  if (p.human) {
+    if (colors.length === 1) return drawFrom(idx, colors[0]);   // 한 색만 남았으면 고를 것이 없다
+    G.phase = 'draw';
+    note('나: 뽑을 더미(검정 또는 흰색)를 고르세요.');
+    return render();
+  }
+  drawFrom(idx, aiPickColor());
 }
 
 function endTurn() {
@@ -387,51 +411,79 @@ function candidates(owner, t, guesserIdx) {
   return out;
 }
 
-// 심화 추론: 색이 확실히 숫자인 블록(공개된 숫자 블록, 또는 같은 색 조커가 이미 알려진 블록)끼리의
-// 순서 제약을 양방향으로 전파해 숨은 블록의 가능한 범위를 좁힌다. 조커가 섞여 있어도 숫자 블록끼리의 순서는 유효하다.
-function deepCandidates(owner, t, guesserIdx) {
+// 정확한 추론: 공개 정보와 규칙을 모두 만족하는 배치를 DP로 세어, 각 숨은 블록이 각 값일 확률을 구한다.
+// 손패는 (숫자, 검정 먼저, 흰색 나중) 순서로 정렬되어 있고, 조커는 색마다 한 장이며 어느 자리에든 놓일 수 있다.
+// 상대 손패끼리의 값 중복은 고려하지 않는 근사이다.
+function distribution(owner, guesserIdx) {
   const known = new Set();
   const K = x => `${x.v}${x.c}`;
   G.players[guesserIdx].hand.forEach(x => known.add(K(x)));
   G.players.forEach(p => p.hand.forEach(x => { if (x.open) known.add(K(x)); }));
-
-  const h = owner.hand;
-  const def = h.map(x => (x.open ? x.v !== 'J' : known.has(`J${x.c}`)));
-  const lo = h.map(() => 0);
-  const hi = h.map(() => 23);
-  h.forEach((x, j) => { if (x.open && def[j]) lo[j] = hi[j] = tkey(x); });
-
-  let changed = true;
-  while (changed) {
-    changed = false;
-    let prev = -1;
-    for (let j = 0; j < h.length; j++) {          // 왼쪽에서 오른쪽: 하한 전파
-      if (!def[j]) continue;
-      if (prev >= 0 && lo[j] < lo[prev] + 1) { lo[j] = lo[prev] + 1; changed = true; }
-      prev = j;
+  const key = (n, c) => n * 2 + (c === 'w' ? 1 : 0);
+  const hand = owner.hand;
+  const NS = 25 * 4;                              // 상태: 마지막 숫자 키(-1..23) × 검정 조커 사용 여부 × 흰색 조커 사용 여부
+  const sIdx = (last, jb, jw) => (last + 1) * 4 + jb * 2 + jw;
+  const trans = (x, s) => {
+    const last = (s >> 2) - 1, jb = (s >> 1) & 1, jw = s & 1;
+    const out = [];
+    if (x.open) {
+      if (x.v === 'J') return [{ val: null, s2: s }];
+      const k = key(x.v, x.c);
+      if (k > last) out.push({ val: null, s2: sIdx(k, jb, jw) });
+      return out;
     }
-    let next = -1;
-    for (let j = h.length - 1; j >= 0; j--) {     // 오른쪽에서 왼쪽: 상한 전파
-      if (!def[j]) continue;
-      if (next >= 0 && hi[j] > hi[next] - 1) { hi[j] = hi[next] - 1; changed = true; }
-      next = j;
+    for (let n = 0; n <= 11; n++) {
+      const k = key(n, x.c);
+      if (k > last && !known.has(`${n}${x.c}`)) out.push({ val: n, s2: sIdx(k, jb, jw) });
     }
+    if (!known.has(`J${x.c}`)) {
+      if (x.c === 'b' && !jb) out.push({ val: 'J', s2: sIdx(last, 1, jw) });
+      if (x.c === 'w' && !jw) out.push({ val: 'J', s2: sIdx(last, jb, 1) });
+    }
+    return out;
+  };
+  const n = hand.length;
+  const F = [new Float64Array(NS)];
+  F[0][sIdx(-1, 0, 0)] = 1;
+  for (let i = 0; i < n; i++) {
+    const nx = new Float64Array(NS);
+    for (let s = 0; s < NS; s++) {
+      if (!F[i][s]) continue;
+      for (const tr of trans(hand[i], s)) nx[tr.s2] += F[i][s];
+    }
+    F.push(nx);
   }
-
-  // 대상 블록의 범위: 확실한 숫자 블록이면 그 범위, 아니면 양옆 확실한 블록이 주는 범위
-  const idx = h.indexOf(t);
-  let L = 0, H = 23;
-  for (let j = 0; j < idx; j++) if (def[j]) L = Math.max(L, lo[j] + 1);
-  for (let j = h.length - 1; j > idx; j--) if (def[j]) H = Math.min(H, hi[j] - 1);
-  if (def[idx]) { L = Math.max(L, lo[idx]); H = Math.min(H, hi[idx]); }
-
-  const out = [];
-  for (let n = 0; n <= 11; n++) {
-    const k = n * 2 + (t.c === 'w' ? 1 : 0);
-    if (k >= L && k <= H && !known.has(`${n}${t.c}`)) out.push(n);
+  let total = 0;
+  for (let s = 0; s < NS; s++) total += F[n][s];
+  const result = new Map();
+  if (!total) return result;
+  const B = new Array(n + 1);
+  B[n] = new Float64Array(NS).fill(1);
+  for (let i = n - 1; i >= 0; i--) {
+    const b = new Float64Array(NS);
+    for (let s = 0; s < NS; s++) for (const tr of trans(hand[i], s)) b[s] += B[i + 1][tr.s2];
+    B[i] = b;
   }
-  if (!known.has(`J${t.c}`)) out.push('J');
-  return out;
+  hand.forEach((x, i) => {
+    if (x.open) return;
+    const cnt = new Map();
+    for (let s = 0; s < NS; s++) {
+      if (!F[i][s]) continue;
+      for (const tr of trans(x, s)) {
+        cnt.set(tr.val, (cnt.get(tr.val) || 0) + F[i][s] * B[i + 1][tr.s2]);
+      }
+    }
+    const m = new Map();
+    cnt.forEach((c, v) => { if (c > 0) m.set(v, c / total); });
+    result.set(x.id, m);
+  });
+  return result;
+}
+
+// 대상 블록이 가질 수 있는 값 목록 (확률 0인 값은 제외)
+function deepCandidates(owner, t, guesserIdx) {
+  const m = distribution(owner, guesserIdx).get(t.id);
+  return m ? [...m.keys()] : [];
 }
 
 function aiGuessStep() {
@@ -541,19 +593,31 @@ function bestOptions() {
   const opts = [];
   G.players.forEach((p, oi) => {
     if (oi === 0 || p.out) return;
+    const dist = distribution(p, 0);
     p.hand.forEach(t => {
       if (t.open) return;
-      const c = deepCandidates(p, t, 0);
-      if (!c.length) return;
-      c.forEach(v => opts.push({ oi, tile: t, v, prob: 1 / c.length }));
+      const m = dist.get(t.id);
+      if (!m) return;
+      m.forEach((prob, v) => opts.push({ oi, tile: t, v, prob }));
     });
   });
   opts.sort((a, b) => b.prob - a.prob || hiddenCount(a.oi) - hiddenCount(b.oi));
   return opts;
 }
 
+// 화면에서 왼쪽부터 센 위치 (손패 배열 순서 = 화면 순서)
+function posText(oi, t) {
+  const n = G.players[oi].hand.indexOf(t) + 1;
+  return `${G.players[oi].name}의 왼쪽에서 ${n}번째 ${COLOR[t.c]} 블록`;
+}
+
+function pctText(p) {
+  const pct = Math.round(p * 100);
+  return pct < 1 ? '1% 미만' : `약 ${pct}%`;
+}
+
 function describe(o) {
-  return `${G.players[o.oi].name}의 ${COLOR[o.tile.c]} 블록을 ${lab(o.v)}(으)로 보면 맞힐 확률 약 ${Math.round(o.prob * 100)}%`;
+  return `${posText(o.oi, o.tile)}을 ${lab(o.v)}(으)로 보면 맞힐 확률 ${pctText(o.prob)}`;
 }
 
 // 추리 평가: 틀리면 맞힌 확률 자체보다 내 남은 블록 수가 중요하다
@@ -562,7 +626,7 @@ function reviewGuess(tile, owner, v, ok) {
   const best = opts[0];
   const mine = opts.find(o => o.tile === tile && o.v === v);
   const myProb = mine ? mine.prob : 0;
-  const mineText = mine ? describe(mine) : `${G.players[owner].name}의 ${COLOR[tile.c]} 블록을 ${lab(v)}(으)로 찍었습니다`;
+  const mineText = mine ? describe(mine) : `${posText(owner, tile)}을 ${lab(v)}(으)로 찍었습니다`;
   const lines = [];
   lines.push(`내 수: ${mineText}.`);
   if (!mine) {
@@ -572,7 +636,7 @@ function reviewGuess(tile, owner, v, ok) {
   } else if (best && myProb >= best.prob - 1e-9) {
     lines.push('✔ 최선과 확률이 같습니다. 무난한 선택이었습니다.');
   } else if (best) {
-    lines.push(`△ 더 나은 선택이 있었습니다. 가장 좋은 수는 ${describe(best)}.`);
+    lines.push(`△ 더 좋은 수가 있었습니다. ${posText(best.oi, best.tile)}을 ${lab(best.v)}(으)로 추리했다면 확률이 더 높았습니다 (${pctText(best.prob)}).`);
   }
   if (!ok && myProb >= 0.3) lines.push('확률 자체는 괜찮았지만 이번에는 운이 따르지 않았습니다.');
   if (!ok && hiddenCount(0) <= 2) lines.push(`내 숨은 블록이 ${hiddenCount(0)}개뿐이라 틀리면 탈락에 가까워집니다. 이런 때는 확률 낮은 도전을 피하는 편이 좋습니다.`);
@@ -634,6 +698,19 @@ function controls() {
         <div class="row">
           ${tile(G.pending, 0)}
           <p>뽑은 조커를 놓을 자리를 고르세요. 점선 칸을 누르면 그 자리에 들어갑니다.</p>
+        </div>
+      </div>`;
+  }
+
+  if (G.phase === 'draw' && G.cur === 0) {
+    const nb = G.pile.filter(t => t.c === 'b').length;
+    const nw = G.pile.filter(t => t.c === 'w').length;
+    return `
+      <div class="panel">
+        <p>뽑을 더미를 고르세요. 숫자는 뽑기 전까지 알 수 없습니다.</p>
+        <div class="row">
+          ${nb ? `<button class="btn" data-act="draw" data-c="b">검정 더미 (${nb}장)</button>` : ''}
+          ${nw ? `<button class="btn" data-act="draw" data-c="w">흰색 더미 (${nw}장)</button>` : ''}
         </div>
       </div>`;
   }
@@ -727,6 +804,7 @@ document.addEventListener('click', e => {
     case 'start':    newGame(Number(el.dataset.n), el.dataset.diff || 'normal'); break;
     case 'again':    newGame(G.players.length, G.diff); break;
     case 'restart':  clearTimeout(aiTimer); G = null; render(); break;
+    case 'draw':     if (G && G.phase === 'draw' && G.cur === 0) drawFrom(0, el.dataset.c); break;
     case 'pick':     pickTarget(Number(el.dataset.id)); break;
     case 'guess':    submitGuess(el.dataset.v === 'J' ? 'J' : Number(el.dataset.v)); break;
     case 'cancel':   if (G) { G.target = null; render(); } break;
