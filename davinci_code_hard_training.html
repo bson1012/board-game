@@ -225,11 +225,70 @@ function newGame(total, diff = 'normal') {
 
 /* ---------- 턴 진행 ---------- */
 
+// 뽑기 색 평가: 색 c의 블록을 뽑으면 그 숫자를 알게 된다. 가능한 숫자는 아직 모르는 블록들 중 같은 색에서 균등하게 나온다고 본다.
+// 숫자를 알게 된 뒤 다음 추리의 최고 확률을 평균낸 값이 높을수록 좋은 선택이다.
+function expectedChance(c) {
+  const knownKeys = new Set();
+  const K = x => `${x.v}${x.c}`;
+  G.players[0].hand.forEach(x => knownKeys.add(K(x)));
+  G.players.forEach(p => p.hand.forEach(x => { if (x.open) knownKeys.add(K(x)); }));
+  const unknown = [...Array(12).keys(), 'J'].map(v => `${v}${c}`).filter(k => !knownKeys.has(k));
+  if (!unknown.length) return 0;
+  let sum = 0;
+  for (const k of unknown) {
+    const best = bestOptions([k])[0];
+    sum += best ? best.prob : 0;
+  }
+  return sum / unknown.length;
+}
+
+// 상대(컴퓨터)가 내 숨은 블록 중 하나를 맞힐 수 있는 최고 확률 (낮을수록 안전)
+function threatOn(handArr) {
+  const dist = distribution({ hand: handArr }, 1);
+  let best = 0;
+  dist.forEach(m => m.forEach(p => { if (p > best) best = p; }));
+  return best;
+}
+
+// 조커 배치 평가: 놓을 수 있는 모든 자리에 대해 상대의 최고 확률을 비교한다
+function reviewJoker(g) {
+  const base = G.players[0].hand;
+  const j = G.pending;
+  const scores = [];
+  for (let k = 0; k <= base.length; k++) {
+    const hyp = base.slice();
+    hyp.splice(k, 0, j);
+    scores.push(threatOn(hyp));
+  }
+  const chosen = scores[g];
+  let bestK = 0;
+  scores.forEach((s, k) => { if (s < scores[bestK]) bestK = k; });
+  const lines = [`왼쪽에서 ${g + 1}번째 자리에 놓았습니다. 상대가 내 숨은 블록을 맞힐 최고 확률: ${pctText(chosen)}`];
+  if (chosen <= scores[bestK] + 1e-9) lines.push('✔ 상대가 가장 어렵게 맞힐 수 있는 자리였습니다.');
+  else lines.push(`△ 왼쪽에서 ${bestK + 1}번째 자리에 놓았다면 상대의 최고 확률이 ${pctText(scores[bestK])}로 낮았을 것입니다.`);
+  lines.push('조커는 숫자 순서에서 빠져 있어서, 숨은 블록 사이에 놓이면 상대가 그 블록이 조커인지 숫자인지 알 수 없습니다. 그만큼 추리가 어려워집니다.');
+  return { title: '조커 배치 평가', lines };
+}
+
+function reviewDraw(color) {
+  const other = color === 'b' ? 'w' : 'b';
+  const evC = expectedChance(color);
+  const evO = expectedChance(other);
+  const lines = [`${COLOR[color]} 더미를 골랐습니다. 뽑은 블록의 숫자를 알게 된 뒤 다음 추리 기회: 평균 ${pctText(evC)}`,
+                 `${COLOR[other]} 더미였다면: 평균 ${pctText(evO)}`];
+  if (evC >= evO - 1e-9) lines.push('✔ 더 나은 색을 골랐습니다.');
+  else lines.push(`△ ${COLOR[other]} 더미가 다음 추리 기회를 더 많이 주었습니다.`);
+  lines.push('뽑은 블록의 숫자가 드러날수록 상대 블록의 가능한 숫자가 줄어듭니다. 그래서 이 기대값을 기준으로 봤습니다.');
+  return { title: '뽑기 색 평가', lines };
+}
+
 // 더미에서 지정한 색의 블록 한 장을 뽑는다. 숫자는 뽑기 전까지 알 수 없다.
 function drawFrom(idx, color) {
   const p = G.players[idx];
   const i = G.pile.findIndex(t => t.c === color);
   if (i < 0) return;
+  const choiceMade = new Set(G.pile.map(t => t.c)).size > 1;
+  if (p.human && STUDY.show && choiceMade) STUDY.review = reviewDraw(color);   // 뽑기 전 상태로 평가
   const t = G.pile.splice(i, 1)[0];
   if (t.v === 'J' && p.human) {
     G.pending = t;
@@ -273,6 +332,7 @@ function startTurn() {
   if (p.human) {
     if (colors.length === 1) return drawFrom(idx, colors[0]);   // 한 색만 남았으면 고를 것이 없다
     G.phase = 'draw';
+    STUDY.review = null;   // 선택 전에는 조언을 보이지 않는다
     note('나: 뽑을 더미(검정 또는 흰색)를 고르세요.');
     return render();
   }
@@ -294,6 +354,7 @@ function endTurn() {
 
 function placeJoker(g) {
   if (!G || G.phase !== 'placeJoker') return;
+  if (STUDY.show) STUDY.review = reviewJoker(g);   // 놓기 전 상태로 평가
   insertAt(G.players[0].hand, G.pending, g);
   G.drawn = G.pending;
   G.pending = null;
@@ -414,11 +475,12 @@ function candidates(owner, t, guesserIdx) {
 // 정확한 추론: 공개 정보와 규칙을 모두 만족하는 배치를 DP로 세어, 각 숨은 블록이 각 값일 확률을 구한다.
 // 손패는 (숫자, 검정 먼저, 흰색 나중) 순서로 정렬되어 있고, 조커는 색마다 한 장이며 어느 자리에든 놓일 수 있다.
 // 상대 손패끼리의 값 중복은 고려하지 않는 근사이다.
-function distribution(owner, guesserIdx) {
+function distribution(owner, guesserIdx, extra = null) {
   const known = new Set();
   const K = x => `${x.v}${x.c}`;
   G.players[guesserIdx].hand.forEach(x => known.add(K(x)));
   G.players.forEach(p => p.hand.forEach(x => { if (x.open) known.add(K(x)); }));
+  if (extra) extra.forEach(k => known.add(k));   // 가정: 뽑아서 알게 될 블록
   const key = (n, c) => n * 2 + (c === 'w' ? 1 : 0);
   const hand = owner.hand;
   const NS = 25 * 4;                              // 상태: 마지막 숫자 키(-1..23) × 검정 조커 사용 여부 × 흰색 조커 사용 여부
@@ -589,11 +651,11 @@ function seat(p, i) {
 function hiddenCount(oi) { return G.players[oi].hand.filter(t => !t.open).length; }
 
 // 지금 시점에서 가능한 모든 추리 (상대 숨은 블록 × 가능한 값), 확률 높은 순
-function bestOptions() {
+function bestOptions(extra = null) {
   const opts = [];
   G.players.forEach((p, oi) => {
     if (oi === 0 || p.out) return;
-    const dist = distribution(p, 0);
+    const dist = distribution(p, 0, extra);
     p.hand.forEach(t => {
       if (t.open) return;
       const m = dist.get(t.id);
