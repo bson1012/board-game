@@ -129,7 +129,7 @@ let aiTimer = null;
 let record = { win: 0, lose: 0 };   // 컴퓨터와 1대1 전적 (페이지를 떠나면 초기화)
 // 연구 모드: 상대 숨은 블록의 후보와 맞힐 확률을 보여준다
 // 학습 모드: 사람이 둔 수를 평가해 코멘트한다 (review: 가장 최근 평가)
-const STUDY = { show: false, review: null };
+const STUDY = { show: false, review: null, events: [], hits: { myHit: 0, myMiss: 0, aiHit: 0, aiMiss: 0 } };
 
 const COLOR = { b: '검정', w: '흰색' };
 
@@ -189,6 +189,8 @@ function insertAt(hand, t, g) {
 function newGame(total, diff = 'normal') {
   clearTimeout(aiTimer);
   aiTimer = null;
+  STUDY.events = [];
+  STUDY.hits = { myHit: 0, myMiss: 0, aiHit: 0, aiMiss: 0 };
 
   const deck = shuffle(makeTiles());
   const per = total === 4 ? 3 : 4;   // 2~3명은 4개, 4명은 3개
@@ -209,6 +211,7 @@ function newGame(total, diff = 'normal') {
 
   G = {
     diff,
+    wrong: [],          // 틀린 추리 기록: 그 블록은 그 값이 아니다 (양쪽 모두 로그로 알 수 있다)
     players,
     pile: shuffle(deck),
     cur: 0,
@@ -267,6 +270,8 @@ function reviewJoker(g) {
   if (chosen <= scores[bestK] + 1e-9) lines.push('✔ 상대가 가장 어렵게 맞힐 수 있는 자리였습니다.');
   else lines.push(`△ 왼쪽에서 ${bestK + 1}번째 자리에 놓았다면 상대의 최고 확률이 ${pctText(scores[bestK])}로 낮았을 것입니다.`);
   lines.push('조커는 숫자 순서에서 빠져 있어서, 숨은 블록 사이에 놓이면 상대가 그 블록이 조커인지 숫자인지 알 수 없습니다. 그만큼 추리가 어려워집니다.');
+  const minS = scores[bestK];
+  STUDY.events.push({ kind: 'joker', gap: Math.max(0, chosen - minS), desc: `왼쪽에서 ${g + 1}번째 자리에 조커 배치 (상대 최고 확률 ${pctText(chosen)})`, better: bestK !== g ? `왼쪽에서 ${bestK + 1}번째 자리 (상대 최고 확률 ${pctText(minS)})` : null, prob: chosen });
   return { title: '조커 배치 평가', lines };
 }
 
@@ -279,6 +284,7 @@ function reviewDraw(color) {
   if (evC >= evO - 1e-9) lines.push('✔ 더 나은 색을 골랐습니다.');
   else lines.push(`△ ${COLOR[other]} 더미가 다음 추리 기회를 더 많이 주었습니다.`);
   lines.push('뽑은 블록의 숫자가 드러날수록 상대 블록의 가능한 숫자가 줄어듭니다. 그래서 이 기대값을 기준으로 봤습니다.');
+  STUDY.events.push({ kind: 'draw', gap: Math.max(0, Math.max(evC, evO) - evC), desc: `${COLOR[color]} 더미에서 뽑기`, better: evO > evC ? `${COLOR[other]} 더미 (평균 ${pctText(evO)})` : null, prob: evC });
   return { title: '뽑기 색 평가', lines };
 }
 
@@ -418,6 +424,8 @@ function submitGuess(v) {
   const ok = tile.v === v;
   if (STUDY.show) STUDY.review = reviewGuess(tile, owner, v, ok);   // 수를 두기 전 상태로 평가
   note(`나: ${G.players[owner].name}의 ${COLOR[tile.c]} 블록을 ${lab(v)}(으)로 맞혀 봤습니다 → ${ok ? '맞음' : '틀림'}`);
+  STUDY.hits[ok ? 'myHit' : 'myMiss']++;
+  if (!ok) G.wrong.push({ id: tile.id, v });
   G.target = null;
   if (ok) {
     reveal(tile, owner);
@@ -485,6 +493,7 @@ function distribution(owner, guesserIdx, extra = null) {
   const hand = owner.hand;
   const NS = 25 * 4;                              // 상태: 마지막 숫자 키(-1..23) × 검정 조커 사용 여부 × 흰색 조커 사용 여부
   const sIdx = (last, jb, jw) => (last + 1) * 4 + jb * 2 + jw;
+  const wrongSet = new Set((G.wrong || []).map(w => `${w.id}|${w.v}`));
   const trans = (x, s) => {
     const last = (s >> 2) - 1, jb = (s >> 1) & 1, jw = s & 1;
     const out = [];
@@ -496,9 +505,9 @@ function distribution(owner, guesserIdx, extra = null) {
     }
     for (let n = 0; n <= 11; n++) {
       const k = key(n, x.c);
-      if (k > last && !known.has(`${n}${x.c}`)) out.push({ val: n, s2: sIdx(k, jb, jw) });
+      if (k > last && !known.has(`${n}${x.c}`) && !wrongSet.has(`${x.id}|${n}`)) out.push({ val: n, s2: sIdx(k, jb, jw) });
     }
-    if (!known.has(`J${x.c}`)) {
+    if (!known.has(`J${x.c}`) && !wrongSet.has(`${x.id}|J`)) {
       if (x.c === 'b' && !jb) out.push({ val: 'J', s2: sIdx(last, 1, jw) });
       if (x.c === 'w' && !jw) out.push({ val: 'J', s2: sIdx(last, jb, 1) });
     }
@@ -584,6 +593,8 @@ function aiGuessStep() {
 
   const guess = best.c[Math.floor(Math.random() * best.c.length)];
   const ok = best.t.v === guess;
+  STUDY.hits[ok ? 'aiHit' : 'aiMiss']++;
+  if (!ok) G.wrong.push({ id: best.t.id, v: guess });
   const owner = G.players[best.oi];
   note(`${me.name}: ${owner.name}의 ${COLOR[best.t.c]} 블록을 ${lab(guess)}(으)로 맞혀 봤습니다 → ${ok ? '맞음' : '틀림'}`);
 
@@ -702,6 +713,7 @@ function reviewGuess(tile, owner, v, ok) {
   }
   if (!ok && myProb >= 0.3) lines.push('확률 자체는 괜찮았지만 이번에는 운이 따르지 않았습니다.');
   if (!ok && hiddenCount(0) <= 2) lines.push(`내 숨은 블록이 ${hiddenCount(0)}개뿐이라 틀리면 탈락에 가까워집니다. 이런 때는 확률 낮은 도전을 피하는 편이 좋습니다.`);
+  STUDY.events.push({ kind: 'guess', ok, gap: best ? Math.max(0, best.prob - myProb) : 0, prob: myProb, desc: `${posText(owner, tile)} ${lab(v)} 추리`, better: best && !(best.tile === tile && best.v === v) ? describe(best) : null });
   return { title: '추리 평가', lines };
 }
 
@@ -720,11 +732,50 @@ function reviewContinue(goOn) {
     else if (best.prob < 0.25) lines.push('✔ 확률이 낮은 상황에서 멈춘 것은 안전한 선택입니다.');
     else lines.push('무난한 선택입니다.');
   }
+  const h2 = hiddenCount(0);
+  const badGo = goOn && best.prob < 0.25 && h2 <= 2;
+  const badStop = !goOn && best.prob >= 0.5;
+  STUDY.events.push({ kind: goOn ? 'continue' : 'stop', gap: badGo ? 0.25 - best.prob : badStop ? best.prob : 0, desc: goOn ? '계속 추리' : '차례 넘김', better: badStop ? describe(best) : null, prob: best.prob });
   return { title: '차례 판단 평가', lines };
+}
+
+// 판이 끝난 뒤의 분석: 이긴 이유와 진 이유를 기록된 선택과 추리 결과로 요약
+function buildSummary() {
+  const ev = STUDY.events, h = STUDY.hits;
+  const won = G.winner === 0;
+  const lines = [];
+  lines.push(`결과: ${won ? '승리' : '패배'}. 내 맞힘 ${h.myHit}회, 틀림 ${h.myMiss}회 / 컴퓨터 맞힘 ${h.aiHit}회(내 블록 공개), 틀림 ${h.aiMiss}회`);
+  if (!ev.length) {
+    lines.push('학습 모드를 켠 뒤의 선택만 분석됩니다. 이번 판은 분석할 선택이 없습니다.');
+    return { title: '판 분석', lines };
+  }
+  const good = ev.filter(e => e.gap < 0.02).length;
+  lines.push(`내 선택 ${ev.length}개 중 최선에 가까운 선택은 ${good}개였습니다.`);
+  if (won) {
+    lines.push(h.myHit >= h.aiHit
+      ? '추리 정확도와 공개 순서에서 앞서 나갔습니다.'
+      : '상대가 내 블록을 더 많이 맞혔지만, 결정적인 순간에 상대가 틀리거나 탈락에 가까워졌습니다.');
+  } else {
+    lines.push(h.aiHit > h.myHit
+      ? '상대가 내 블록을 더 많이 맞혔습니다. 추리 정확도에서 밀렸습니다.'
+      : '추리 정확도는 비슷했지만, 결정적인 순간에 내 블록이 먼저 공개되었습니다.');
+  }
+  const worst = ev.filter(e => e.gap >= 0.02).sort((a, b) => b.gap - a.gap).slice(0, 2);
+  if (worst.length) {
+    lines.push('가장 아쉬운 선택:');
+    worst.forEach(e => lines.push(`· ${e.desc}.${e.better ? ` 더 나은 선택: ${e.better}.` : ''}`));
+  }
+  const bestGuess = ev.filter(e => e.kind === 'guess' && e.ok).sort((a, b) => b.prob - a.prob)[0];
+  if (bestGuess) lines.push(`가장 좋았던 추리: ${bestGuess.desc}(맞힐 확률 ${pctText(bestGuess.prob)}), 맞힘.`);
+  return { title: '판 분석', lines };
 }
 
 function reviewPanel() {
   if (!STUDY.show) return '';
+  if (G && isOver()) {
+    const s = buildSummary();
+    return `<div class="study"><div class="study-title">${s.title}</div>${s.lines.map(l => `<div class="study-row">${l}</div>`).join('')}</div>`;
+  }
   const r = STUDY.review;
   if (!r) return `<div class="study"><div class="study-row">사람이 추리하거나 계속할지 정하면 여기에 평가가 나옵니다.</div></div>`;
   return `<div class="study"><div class="study-title">${r.title}</div>${r.lines.map(l => `<div class="study-row">${l}</div>`).join('')}</div>`;
